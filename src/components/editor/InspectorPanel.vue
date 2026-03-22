@@ -20,6 +20,7 @@ const props = defineProps<{
 defineEmits<{
   setWireType: [type: WireType]
   deleteSelected: []
+  resizeBoard: [rows: number, cols: number]
   updateSelectedLinkColor: [color: string]
   moveSelectedCut: [row: number, col: number]
   moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
@@ -74,6 +75,16 @@ function toCoordinate(value: string, fallback: number) {
 
   return parsed
 }
+
+function toBoardSize(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
 </script>
 
 <template>
@@ -96,6 +107,36 @@ function toCoordinate(value: string, fallback: number) {
     </div>
 
     <template v-if="activeTab === 'project'">
+      <section>
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Board Size</p>
+        <div class="mt-3 grid grid-cols-2 gap-3 rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Rows</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="5"
+              :max="200"
+              :value="board.rows"
+              @change="$emit('resizeBoard', toBoardSize(($event.target as HTMLInputElement).value, board.rows), board.cols)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Columns</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="8"
+              :max="200"
+              :value="board.cols"
+              @change="$emit('resizeBoard', board.rows, toBoardSize(($event.target as HTMLInputElement).value, board.cols))"
+            />
+          </label>
+        </div>
+        <p class="mt-2 text-xs leading-5 text-stone-500">
+          Shrinking the board removes cuts, links, wires, and placed items that fall outside the new bounds.
+        </p>
+      </section>
 
       <section class="grid grid-cols-2 gap-3 text-sm">
         <div class="rounded-2xl bg-stone-900 px-3 py-4 text-stone-50">

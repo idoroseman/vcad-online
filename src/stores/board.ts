@@ -15,6 +15,10 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
+function isHoleWithinBoard(row: number, col: number, rows: number, cols: number) {
+  return row >= 0 && row < rows && col >= 0 && col < cols
+}
+
 function createBoardState(mode: StorageMode = 'local'): BoardState {
   return {
     rows: 25,
@@ -53,6 +57,59 @@ export const useBoardStore = defineStore('board', () => {
 
   function resetBoard() {
     board.value = createBoardState('local')
+  }
+
+  function resizeBoard(rows: number, cols: number) {
+    const nextRows = clamp(Math.round(rows), 5, 200)
+    const nextCols = clamp(Math.round(cols), 8, 200)
+
+    board.value.rows = nextRows
+    board.value.cols = nextCols
+    board.value.cuts = board.value.cuts.filter((item) => isHoleWithinBoard(item.row, item.col, nextRows, nextCols))
+    board.value.wires = board.value.wires.filter((item) => isHoleWithinBoard(item.row, item.col, nextRows, nextCols))
+    board.value.links = board.value.links.filter(
+      (item) =>
+        isHoleWithinBoard(item.fromRow, item.fromCol, nextRows, nextCols) &&
+        isHoleWithinBoard(item.toRow, item.toCol, nextRows, nextCols),
+    )
+    board.value.components = board.value.components.filter((item) =>
+      isHoleWithinBoard(item.row, item.col, nextRows, nextCols),
+    )
+
+    if (
+      pendingLinkStart.value &&
+      !isHoleWithinBoard(pendingLinkStart.value.row, pendingLinkStart.value.col, nextRows, nextCols)
+    ) {
+      pendingLinkStart.value = null
+    }
+
+    if (!selectedItem.value) {
+      return
+    }
+
+    if (selectedItem.value.kind === 'cut') {
+      const cutExists = board.value.cuts.some((item) => item.id === selectedItem.value?.id)
+
+      if (!cutExists) {
+        selectedItem.value = null
+      }
+    }
+
+    if (selectedItem.value?.kind === 'wire') {
+      const wireExists = board.value.wires.some((item) => item.id === selectedItem.value?.id)
+
+      if (!wireExists) {
+        selectedItem.value = null
+      }
+    }
+
+    if (selectedItem.value?.kind === 'link') {
+      const linkExists = board.value.links.some((item) => item.id === selectedItem.value?.id)
+
+      if (!linkExists) {
+        selectedItem.value = null
+      }
+    }
   }
 
   function setSelectedItem(item: SelectedItem) {
@@ -386,6 +443,7 @@ export const useBoardStore = defineStore('board', () => {
     pendingLinkStart,
     selectedItem,
     resetBoard,
+    resizeBoard,
     setSelectedItem,
     renameProject,
     setActiveTool,

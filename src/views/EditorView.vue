@@ -85,6 +85,7 @@ onUnmounted(() => {
         @move-selected-cut="boardStore.moveSelectedCut"
         @move-selected-link="boardStore.moveSelectedLink"
         @move-selected-wire="boardStore.moveSelectedWire"
+        @resize-board="boardStore.resizeBoard"
         @set-wire-type="boardStore.setActiveWireType"
         @update-selected-link-color="boardStore.updateSelectedLinkColor"
         @update-selected-wire-note="boardStore.updateSelectedWireNote"
