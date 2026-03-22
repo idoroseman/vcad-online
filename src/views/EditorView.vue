@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 
@@ -11,7 +12,8 @@ import { useBoardStore } from '../stores/board'
 const boardStore = useBoardStore()
 const route = useRoute()
 
-const { board, counts, online, activeTool, activeWireType, pendingLinkStart } = storeToRefs(boardStore)
+const { board, counts, online, activeTool, activeWireType, pendingLinkStart, selectedItem } =
+  storeToRefs(boardStore)
 
 if (typeof route.params.id === 'string' && route.params.id.length > 0) {
   boardStore.loadCloudProject(route.params.id)
@@ -34,6 +36,31 @@ function handleNewBoard() {
     boardStore.resetBoard()
   }
 }
+
+function handleKeyDown(event: KeyboardEvent) {
+  if (activeTool.value !== 'inspect') {
+    return
+  }
+
+  if (event.key !== 'Delete' && event.key !== 'Backspace') {
+    return
+  }
+
+  if (!selectedItem.value) {
+    return
+  }
+
+  event.preventDefault()
+  boardStore.deleteSelected()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
 </script>
 
 <template>
@@ -53,14 +80,21 @@ function handleNewBoard() {
         :board="board"
         :counts="counts"
         :pending-link-start="pendingLinkStart"
-        @cancel-placement="boardStore.cancelPendingPlacement"
+        :selected-item="selectedItem"
+        @delete-selected="boardStore.deleteSelected"
         @set-wire-type="boardStore.setActiveWireType"
+        @update-selected-link-color="boardStore.updateSelectedLinkColor"
+        @update-selected-wire-note="boardStore.updateSelectedWireNote"
+        @update-selected-wire-signal-name="boardStore.updateSelectedWireSignalName"
+        @update-selected-wire-type="boardStore.updateSelectedWireType"
       />
       <BoardCanvas
         :active-tool="activeTool"
         :active-wire-type="activeWireType"
         :board="board"
         :pending-link-start="pendingLinkStart"
+        :selected-item="selectedItem"
+        @inspect-hole="boardStore.inspectAtHole"
         @place-hole="boardStore.placeAtHole"
         @set-tool="boardStore.setActiveTool"
       />

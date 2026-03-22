@@ -5,6 +5,12 @@ import { v4 as uuidv4 } from 'uuid'
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
 import type { ActiveTool, BoardState, Cut, Link, StorageMode, Wire, WireType } from '../lib/types'
 
+type SelectedItem =
+  | { kind: 'cut'; id: string }
+  | { kind: 'link'; id: string }
+  | { kind: 'wire'; id: string }
+  | null
+
 function createBoardState(mode: StorageMode = 'local'): BoardState {
   return {
     rows: 25,
@@ -25,6 +31,7 @@ export const useBoardStore = defineStore('board', () => {
   const activeTool = ref<ActiveTool>('inspect')
   const activeWireType = ref<WireType>('input')
   const pendingLinkStart = ref<{ row: number; col: number } | null>(null)
+  const selectedItem = ref<SelectedItem>(null)
 
   const counts = computed(() => ({
     cuts: board.value.cuts.length,
@@ -89,6 +96,10 @@ export const useBoardStore = defineStore('board', () => {
     if (tool !== 'link') {
       pendingLinkStart.value = null
     }
+
+    if (tool !== 'inspect') {
+      selectedItem.value = null
+    }
   }
 
   function setActiveWireType(type: WireType) {
@@ -122,6 +133,107 @@ export const useBoardStore = defineStore('board', () => {
 
     createLink(pendingLinkStart.value.row, pendingLinkStart.value.col, row, col)
     pendingLinkStart.value = null
+  }
+
+  function inspectAtHole(row: number, col: number) {
+    const cut = board.value.cuts.find((item) => item.row === row && item.col === col)
+    if (cut) {
+      selectedItem.value = { kind: 'cut', id: cut.id }
+      return
+    }
+
+    const wire = board.value.wires.find((item) => item.row === row && item.col === col)
+    if (wire) {
+      selectedItem.value = { kind: 'wire', id: wire.id }
+      return
+    }
+
+    const link = board.value.links.find(
+      (item) =>
+        (item.fromRow === row && item.fromCol === col) || (item.toRow === row && item.toCol === col),
+    )
+    if (link) {
+      selectedItem.value = { kind: 'link', id: link.id }
+      return
+    }
+
+    selectedItem.value = null
+  }
+
+  function deleteSelected() {
+    if (!selectedItem.value) {
+      return
+    }
+
+    if (selectedItem.value.kind === 'cut') {
+      board.value.cuts = board.value.cuts.filter((item) => item.id !== selectedItem.value?.id)
+    }
+
+    if (selectedItem.value.kind === 'link') {
+      board.value.links = board.value.links.filter((item) => item.id !== selectedItem.value?.id)
+    }
+
+    if (selectedItem.value.kind === 'wire') {
+      board.value.wires = board.value.wires.filter((item) => item.id !== selectedItem.value?.id)
+    }
+
+    selectedItem.value = null
+  }
+
+  function updateSelectedLinkColor(color: string) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'link') {
+      return
+    }
+
+    const link = board.value.links.find((item) => item.id === selectedItem.value?.id)
+
+    if (!link) {
+      return
+    }
+
+    link.color = color
+  }
+
+  function updateSelectedWireSignalName(signalName: string) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'wire') {
+      return
+    }
+
+    const wire = board.value.wires.find((item) => item.id === selectedItem.value?.id)
+
+    if (!wire) {
+      return
+    }
+
+    wire.signalName = signalName
+  }
+
+  function updateSelectedWireType(type: WireType) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'wire') {
+      return
+    }
+
+    const wire = board.value.wires.find((item) => item.id === selectedItem.value?.id)
+
+    if (!wire) {
+      return
+    }
+
+    wire.type = type
+  }
+
+  function updateSelectedWireNote(note: string) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'wire') {
+      return
+    }
+
+    const wire = board.value.wires.find((item) => item.id === selectedItem.value?.id)
+
+    if (!wire) {
+      return
+    }
+
+    wire.note = note
   }
 
   function cancelPendingPlacement() {
@@ -172,12 +284,19 @@ export const useBoardStore = defineStore('board', () => {
     activeTool,
     activeWireType,
     pendingLinkStart,
+    selectedItem,
     resetBoard,
     renameProject,
     setActiveTool,
     setActiveWireType,
     toggleCut,
     placeAtHole,
+    inspectAtHole,
+    deleteSelected,
+    updateSelectedLinkColor,
+    updateSelectedWireSignalName,
+    updateSelectedWireType,
+    updateSelectedWireNote,
     cancelPendingPlacement,
     setStorageMode,
     loadCloudProject,

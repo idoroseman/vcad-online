@@ -8,11 +8,13 @@ const props = defineProps<{
   activeTool: ActiveTool
   activeWireType: WireType
   pendingLinkStart: { row: number; col: number } | null
+  selectedItem: { kind: 'cut' | 'link' | 'wire'; id: string } | null
 }>()
 
 const emit = defineEmits<{
   placeHole: [row: number, col: number]
   setTool: [tool: ActiveTool]
+  inspectHole: [row: number, col: number]
 }>()
 
 const pitch = 18
@@ -95,44 +97,63 @@ function wireColor(type: string) {
 
 function toolClasses(tool: ActiveTool) {
   return props.activeTool === tool
-    ? 'rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-white'
-    : 'rounded-full border border-stone-300 bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700'
+    ? 'inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-white'
+    : 'inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700'
 }
 
 function updateCursorPosition(event: PointerEvent) {
-  if (!svgElement.value) {
+  const hole = clientPointToHole(event.clientX, event.clientY)
+
+  if (!hole) {
     return
   }
 
-  const matrix = svgElement.value.getScreenCTM()
-
-  if (!matrix) {
-    return
-  }
-
-  const point = svgElement.value.createSVGPoint()
-  point.x = event.clientX
-  point.y = event.clientY
-  const svgPoint = point.matrixTransform(matrix.inverse())
-
-  const x = svgPoint.x
-  const y = svgPoint.y
-  const row = Math.max(0, Math.min(props.board.rows - 1, Math.round((y - 32) / pitch)))
-  const col = Math.max(0, Math.min(props.board.cols - 1, Math.round((x - 32) / pitch)))
-
-  cursorPosition.value = { row, col }
+  cursorPosition.value = hole
 }
 
 function clearCursorPosition() {
   cursorPosition.value = null
 }
 
-function handleBoardClick() {
-  if (!cursorPosition.value || props.activeTool === 'inspect') {
+function clientPointToHole(clientX: number, clientY: number) {
+  if (!svgElement.value) {
+    return null
+  }
+
+  const matrix = svgElement.value.getScreenCTM()
+
+  if (!matrix) {
+    return null
+  }
+
+  const point = svgElement.value.createSVGPoint()
+  point.x = clientX
+  point.y = clientY
+  const svgPoint = point.matrixTransform(matrix.inverse())
+
+  const row = Math.max(0, Math.min(props.board.rows - 1, Math.round((svgPoint.y - 32) / pitch)))
+  const col = Math.max(0, Math.min(props.board.cols - 1, Math.round((svgPoint.x - 32) / pitch)))
+
+  return { row, col }
+}
+
+function handleBoardClick(event: MouseEvent) {
+  const hole = clientPointToHole(event.clientX, event.clientY)
+
+  if (!hole) {
     return
   }
 
-  emit('placeHole', cursorPosition.value.row, cursorPosition.value.col)
+  if (props.activeTool === 'inspect') {
+    emit('inspectHole', hole.row, hole.col)
+    return
+  }
+
+  emit('placeHole', hole.row, hole.col)
+}
+
+function isSelected(kind: 'cut' | 'link' | 'wire', id: string) {
+  return props.selectedItem?.kind === kind && props.selectedItem?.id === id
 }
 </script>
 
@@ -141,10 +162,38 @@ function handleBoardClick() {
     <div class="flex h-full flex-col rounded-[24px] bg-[radial-gradient(circle_at_top,#fff7ed,transparent_28%),linear-gradient(180deg,#fde68a_0%,#f3e2a6_100%)] p-3 sm:p-4">
       <div class="mb-3 flex min-h-8 items-center justify-between gap-3 text-xs uppercase tracking-[0.24em] text-stone-600">
         <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto">
-          <button :class="toolClasses('inspect')" @click="emit('setTool', 'inspect')">Inspect</button>
-          <button :class="toolClasses('cut')" @click="emit('setTool', 'cut')">Cut</button>
-          <button :class="toolClasses('link')" @click="emit('setTool', 'link')">Link</button>
-          <button :class="toolClasses('wire')" @click="emit('setTool', 'wire')">Wire</button>
+          <button :class="toolClasses('inspect')" @click="emit('setTool', 'inspect')">
+            <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" />
+              <path d="M10.5 10.5L14 14" stroke-linecap="round" />
+            </svg>
+            <span>Inspect</span>
+          </button>
+          <button :class="toolClasses('cut')" @click="emit('setTool', 'cut')">
+            <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <circle cx="4.5" cy="4.5" r="2.2" />
+              <circle cx="11.5" cy="11.5" r="2.2" />
+              <path d="M6.1 6.1L14 14" stroke-linecap="round" />
+              <path d="M9.8 6.2L14 2" stroke-linecap="round" />
+            </svg>
+            <span>Cut</span>
+          </button>
+          <button :class="toolClasses('link')" @click="emit('setTool', 'link')">
+            <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <circle cx="3.5" cy="12.5" r="1.5" fill="currentColor" stroke="none" />
+              <circle cx="12.5" cy="3.5" r="1.5" fill="currentColor" stroke="none" />
+              <path d="M4.8 11.2C6.4 9.6 8.1 7.9 11.2 4.8" stroke-linecap="round" />
+            </svg>
+            <span>Link</span>
+          </button>
+          <button :class="toolClasses('wire')" @click="emit('setTool', 'wire')">
+            <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M8 2V10" stroke-linecap="round" />
+              <circle cx="8" cy="12.3" r="2.3" />
+              <path d="M5.5 2H10.5" stroke-linecap="round" />
+            </svg>
+            <span>Wire</span>
+          </button>
         </div>
 
         <div class="ml-auto flex min-w-0 flex-nowrap items-center justify-end gap-2 overflow-hidden text-right">
@@ -232,6 +281,16 @@ function handleBoardClick() {
           <g>
             <g v-for="cut in board.cuts" :key="cut.id">
               <circle
+                v-if="isSelected('cut', cut.id)"
+                :cx="pointX(cut.col)"
+                :cy="pointY(cut.row)"
+                r="10.5"
+                fill="none"
+                stroke="#111827"
+                stroke-width="1.6"
+                opacity="0.75"
+              />
+              <circle
                 :cx="pointX(cut.col)"
                 :cy="pointY(cut.row)"
                 r="7.5"
@@ -266,8 +325,8 @@ function handleBoardClick() {
               v-for="link in board.links"
               :key="link.id"
               :d="`M ${pointX(link.fromCol)} ${pointY(link.fromRow)} Q ${(pointX(link.fromCol) + pointX(link.toCol)) / 2} ${Math.min(pointY(link.fromRow), pointY(link.toRow)) - 18} ${pointX(link.toCol)} ${pointY(link.toRow)}`"
-              :stroke="link.color ?? '#0f766e'"
-              stroke-width="3"
+              :stroke="isSelected('link', link.id) ? '#0f172a' : link.color ?? '#0f766e'"
+              :stroke-width="isSelected('link', link.id) ? 5 : 3"
               fill="none"
               stroke-linecap="round"
             />
@@ -275,6 +334,16 @@ function handleBoardClick() {
 
           <g>
             <g v-for="wire in board.wires" :key="wire.id">
+              <circle
+                v-if="isSelected('wire', wire.id)"
+                :cx="pointX(wire.col)"
+                :cy="pointY(wire.row) - 28"
+                r="10"
+                fill="none"
+                stroke="#111827"
+                stroke-width="1.6"
+                opacity="0.75"
+              />
               <line
                 :x1="pointX(wire.col)"
                 :y1="pointY(wire.row)"
