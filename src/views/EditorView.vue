@@ -41,6 +41,16 @@ async function handleImportNetlist(file: File) {
   try {
     const source = await file.text()
     const netlist = boardStore.importKiCadNetlist(source)
+    const isSchematic = file.name.toLowerCase().endsWith('.kicad_sch')
+
+    if (isSchematic && netlist.nets.length === 0) {
+      window.alert(
+        `Imported ${netlist.components.length} components from ${file.name}.\n\n` +
+          'Schematic net connectivity is not yet extracted from .kicad_sch directly. ' +
+          'For full nets/ratsnest import, use a KiCad netlist export (.xml/.net).',
+      )
+      return
+    }
 
     window.alert(`Imported ${netlist.nets.length} nets and ${netlist.components.length} components from ${file.name}.`)
   } catch (error) {

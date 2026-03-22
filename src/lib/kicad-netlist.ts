@@ -164,6 +164,19 @@ function fieldValue(list: Sexpr[] | null, name: string) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function propertyValue(list: Sexpr[] | null, propertyName: string) {
+  const property = childrenByHead(list, 'property').find(
+    (entry) => typeof entry[1] === 'string' && entry[1].trim() === propertyName,
+  )
+
+  if (!property) {
+    return ''
+  }
+
+  const value = property[2]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 function decodeSexprAtom(value: string) {
   const trimmed = value.trim()
 
@@ -176,6 +189,18 @@ function decodeSexprAtom(value: string) {
 
 function readLooseField(block: string, field: string) {
   const pattern = new RegExp(`\\(${field}\\s+("(?:\\\\.|[^"])*"|[^()\\s]+)`, 'i')
+  const match = block.match(pattern)
+
+  if (!match || !match[1]) {
+    return ''
+  }
+
+  return decodeSexprAtom(match[1])
+}
+
+function readLooseProperty(block: string, propertyName: string) {
+  const escaped = propertyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`\\(property\\s+"${escaped}"\\s+("(?:\\\\.|[^"])*"|[^()\\s]+)`, 'i')
   const match = block.match(pattern)
 
   if (!match || !match[1]) {
@@ -395,8 +420,538 @@ export function parseKiCadNetlistSexpr(source: string): Netlist {
   }
 }
 
+function parseKiCadSchematicSexprLoose(source: string): Netlist {
+  const components = extractSexprBlocks(source, 'symbol')
+    .map<NetlistComponent>((block) => ({
+      refDes: readLooseProperty(block, 'Reference'),
+      value: readLooseProperty(block, 'Value'),
+      footprintHint: readLooseProperty(block, 'Footprint') || undefined,
+    }))
+    .filter((component) => component.refDes.length > 0 && !component.refDes.startsWith('#'))
+
+  if (components.length === 0) {
+    throw new Error('No components were found in the KiCad schematic file.')
+  }
+
+  return {
+    components,
+    nets: [],
+  }
+}
+
+interface SchematicPinTemplate {
+  pinNum: string
+  x: number
+  y: number
+  unit: number | null
+}
+
+interface SchematicNamedPoint {
+  name: string
+  x: number
+  y: number
+}
+
+function parseNumberAtom(value: Sexpr | undefined, fallback = 0) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function parseIntAtom(value: Sexpr | undefined, fallback = 0) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function pointKey(x: number, y: number) {
+  return `${x.toFixed(4)}:${y.toFixed(4)}`
+}
+
+function pointEquals(x1: number, y1: number, x2: number, y2: number, tolerance = 0.001) {
+  return Math.abs(x1 - x2) <= tolerance && Math.abs(y1 - y2) <= tolerance
+}
+
+function pointOnSegment(
+  pointX: number,
+  pointY: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  tolerance = 0.001,
+) {
+  const cross = (pointX - x1) * (y2 - y1) - (pointY - y1) * (x2 - x1)
+
+  if (Math.abs(cross) > tolerance) {
+    return false
+  }
+
+  const minX = Math.min(x1, x2) - tolerance
+  const maxX = Math.max(x1, x2) + tolerance
+  const minY = Math.min(y1, y2) - tolerance
+  const maxY = Math.max(y1, y2) + tolerance
+
+  return pointX >= minX && pointX <= maxX && pointY >= minY && pointY <= maxY
+}
+
+function pinTemplateUnit(symbolName: string) {
+  const match = symbolName.match(/_(\d+)_\d+$/)
+
+  if (!match || !match[1]) {
+    return null
+  }
+
+  return Number.parseInt(match[1], 10)
+}
+
+function collectPinTemplates(symbolList: Sexpr[] | null, inheritedUnit: number | null = null): SchematicPinTemplate[] {
+  if (!symbolList) {
+    return []
+  }
+
+  const symbolName = typeof symbolList[1] === 'string' ? symbolList[1] : ''
+  const currentUnit = pinTemplateUnit(symbolName) ?? inheritedUnit
+  const templates: SchematicPinTemplate[] = []
+
+  for (const pin of childrenByHead(symbolList, 'pin')) {
+    const at = childrenByHead(pin, 'at')[0]
+    const number = fieldValue(pin, 'number')
+
+    if (!at || !number) {
+      continue
+    }
+
+    templates.push({
+      pinNum: number,
+      x: parseNumberAtom(at[1], 0),
+      y: parseNumberAtom(at[2], 0),
+      unit: currentUnit,
+    })
+  }
+
+  for (const child of childrenByHead(symbolList, 'symbol')) {
+    templates.push(...collectPinTemplates(child, currentUnit))
+  }
+
+  return templates
+}
+
+function buildLibraryPinTemplates(root: Sexpr[]) {
+  const byLibId = new Map<string, SchematicPinTemplate[]>()
+  const library = childrenByHead(root, 'lib_symbols')[0]
+
+  if (!library) {
+    return byLibId
+  }
+
+  for (const symbol of childrenByHead(library, 'symbol')) {
+    const libId = typeof symbol[1] === 'string' ? symbol[1] : ''
+
+    if (!libId) {
+      continue
+    }
+
+    const templates = collectPinTemplates(symbol)
+
+    if (templates.length > 0) {
+      byLibId.set(libId, templates)
+    }
+  }
+
+  return byLibId
+}
+
+function rotatePoint(x: number, y: number, rotation: number) {
+  const normalized = ((Math.round(rotation / 90) * 90) % 360 + 360) % 360
+
+  switch (normalized) {
+    case 90:
+      return { x: -y, y: x }
+    case 180:
+      return { x: -x, y: -y }
+    case 270:
+      return { x: y, y: -x }
+    default:
+      return { x, y }
+  }
+}
+
+function symbolPinPoints(symbol: Sexpr[], pinTemplatesByLibId: Map<string, SchematicPinTemplate[]>) {
+  const libId = fieldValue(symbol, 'lib_id')
+  const at = childrenByHead(symbol, 'at')[0]
+
+  if (!libId || !at) {
+    return [] as Array<{ pinNum: string; x: number; y: number }>
+  }
+
+  const templates = pinTemplatesByLibId.get(libId) ?? []
+  const unit = parseIntAtom(childrenByHead(symbol, 'unit')[0]?.[1], 1)
+  const originX = parseNumberAtom(at[1], 0)
+  const originY = parseNumberAtom(at[2], 0)
+  const rotation = parseNumberAtom(at[3], 0)
+
+  const instancePins = childrenByHead(symbol, 'pin')
+    .map((pin) => (typeof pin[1] === 'string' ? pin[1].trim() : ''))
+    .filter((pinNum) => pinNum.length > 0)
+  const instancePinSet = new Set(instancePins)
+
+  return templates
+    .filter((template) => template.unit === null || template.unit === unit)
+    .filter((template) => instancePinSet.size === 0 || instancePinSet.has(template.pinNum))
+    .map((template) => {
+      const rotated = rotatePoint(template.x, template.y, rotation)
+
+      return {
+        pinNum: template.pinNum,
+        x: originX + rotated.x,
+        y: originY + rotated.y,
+      }
+    })
+}
+
+function wireSegments(root: Sexpr[]) {
+  return childrenByHead(root, 'wire')
+    .map((wire) => {
+      const pts = childrenByHead(wire, 'pts')[0]
+      const points = childrenByHead(pts, 'xy')
+
+      if (points.length < 2) {
+        return null
+      }
+
+      const start = points[0]
+      const end = points[points.length - 1]
+
+      return {
+        x1: parseNumberAtom(start?.[1], 0),
+        y1: parseNumberAtom(start?.[2], 0),
+        x2: parseNumberAtom(end?.[1], 0),
+        y2: parseNumberAtom(end?.[2], 0),
+      }
+    })
+    .filter((segment): segment is { x1: number; y1: number; x2: number; y2: number } => !!segment)
+}
+
+function schematicLabelPoints(root: Sexpr[]) {
+  const labels = [...childrenByHead(root, 'label'), ...childrenByHead(root, 'global_label'), ...childrenByHead(root, 'hierarchical_label')]
+
+  return labels
+    .map((label) => {
+      const name = typeof label[1] === 'string' ? label[1].trim() : ''
+      const at = childrenByHead(label, 'at')[0]
+
+      if (!name || !at) {
+        return null
+      }
+
+      return {
+        name,
+        x: parseNumberAtom(at[1], 0),
+        y: parseNumberAtom(at[2], 0),
+      }
+    })
+    .filter((entry): entry is { name: string; x: number; y: number } => !!entry)
+}
+
+function symbolNetName(symbol: Sexpr[]) {
+  const libId = fieldValue(symbol, 'lib_id')
+  const refDes = propertyValue(symbol, 'Reference')
+
+  if (!libId.startsWith('power:') && !refDes.startsWith('#PWR')) {
+    return ''
+  }
+
+  const value = propertyValue(symbol, 'Value')
+
+  if (value) {
+    return value
+  }
+
+  const libName = libId.split(':')[1]?.trim() ?? ''
+  return libName
+}
+
+function schematicNamedPoints(root: Sexpr[], pinTemplatesByLibId: Map<string, SchematicPinTemplate[]>) {
+  const namedPoints: SchematicNamedPoint[] = [...schematicLabelPoints(root)]
+
+  for (const symbol of childrenByHead(root, 'symbol')) {
+    const name = symbolNetName(symbol)
+
+    if (!name) {
+      continue
+    }
+
+    const pinPoints = symbolPinPoints(symbol, pinTemplatesByLibId)
+
+    if (pinPoints.length > 0) {
+      for (const pin of pinPoints) {
+        namedPoints.push({
+          name,
+          x: pin.x,
+          y: pin.y,
+        })
+      }
+      continue
+    }
+
+    const at = childrenByHead(symbol, 'at')[0]
+
+    if (!at) {
+      continue
+    }
+
+    namedPoints.push({
+      name,
+      x: parseNumberAtom(at[1], 0),
+      y: parseNumberAtom(at[2], 0),
+    })
+  }
+
+  return namedPoints
+}
+
+function unionFindPoints(points: string[]) {
+  const parent = new Map<string, string>()
+
+  const add = (key: string) => {
+    if (!parent.has(key)) {
+      parent.set(key, key)
+    }
+  }
+
+  const find = (key: string): string => {
+    add(key)
+    const p = parent.get(key)
+
+    if (!p || p === key) {
+      return key
+    }
+
+    const root = find(p)
+    parent.set(key, root)
+    return root
+  }
+
+  const union = (a: string, b: string) => {
+    const ra = find(a)
+    const rb = find(b)
+
+    if (ra !== rb) {
+      parent.set(rb, ra)
+    }
+  }
+
+  for (const point of points) {
+    add(point)
+  }
+
+  return { find, union }
+}
+
+function extractSchematicNets(root: Sexpr[], components: NetlistComponent[]): NetDef[] {
+  const pinTemplatesByLibId = buildLibraryPinTemplates(root)
+  const symbols = childrenByHead(root, 'symbol')
+  const componentByRef = new Map(components.map((component) => [component.refDes.trim().toUpperCase(), component]))
+  const symbolPins: Array<{ refDes: string; pinNum: string; x: number; y: number }> = []
+
+  for (const symbol of symbols) {
+    const refDes = propertyValue(symbol, 'Reference')
+
+    if (!refDes || refDes.startsWith('#')) {
+      continue
+    }
+
+    if (!componentByRef.has(refDes.trim().toUpperCase())) {
+      continue
+    }
+
+    for (const pin of symbolPinPoints(symbol, pinTemplatesByLibId)) {
+      symbolPins.push({
+        refDes,
+        pinNum: pin.pinNum,
+        x: pin.x,
+        y: pin.y,
+      })
+    }
+  }
+
+  const segments = wireSegments(root)
+  const namedPoints = schematicNamedPoints(root, pinTemplatesByLibId)
+  const allPointKeys = new Set<string>()
+
+  for (const segment of segments) {
+    allPointKeys.add(pointKey(segment.x1, segment.y1))
+    allPointKeys.add(pointKey(segment.x2, segment.y2))
+  }
+
+  for (const pin of symbolPins) {
+    allPointKeys.add(pointKey(pin.x, pin.y))
+  }
+
+  for (const namedPoint of namedPoints) {
+    allPointKeys.add(pointKey(namedPoint.x, namedPoint.y))
+  }
+
+  if (allPointKeys.size === 0) {
+    return []
+  }
+
+  const unionFind = unionFindPoints([...allPointKeys])
+
+  for (const segment of segments) {
+    unionFind.union(pointKey(segment.x1, segment.y1), pointKey(segment.x2, segment.y2))
+  }
+
+  const attachPointToSegments = (x: number, y: number) => {
+    const key = pointKey(x, y)
+
+    for (const segment of segments) {
+      if (
+        pointEquals(x, y, segment.x1, segment.y1)
+        || pointEquals(x, y, segment.x2, segment.y2)
+        || pointOnSegment(x, y, segment.x1, segment.y1, segment.x2, segment.y2)
+      ) {
+        unionFind.union(key, pointKey(segment.x1, segment.y1))
+      }
+    }
+  }
+
+  for (const pin of symbolPins) {
+    attachPointToSegments(pin.x, pin.y)
+  }
+
+  for (const namedPoint of namedPoints) {
+    attachPointToSegments(namedPoint.x, namedPoint.y)
+  }
+
+  const namesByGroup = new Map<string, Set<string>>()
+
+  for (const namedPoint of namedPoints) {
+    const group = unionFind.find(pointKey(namedPoint.x, namedPoint.y))
+    const existing = namesByGroup.get(group)
+
+    if (existing) {
+      existing.add(namedPoint.name)
+    } else {
+      namesByGroup.set(group, new Set([namedPoint.name]))
+    }
+  }
+
+  const nodesByGroup = new Map<string, NetNode[]>()
+
+  for (const pin of symbolPins) {
+    const group = unionFind.find(pointKey(pin.x, pin.y))
+    const existing = nodesByGroup.get(group)
+    const node = {
+      refDes: pin.refDes,
+      pinNum: pin.pinNum,
+    }
+
+    if (existing) {
+      if (!existing.some((entry) => entry.refDes === node.refDes && entry.pinNum === node.pinNum)) {
+        existing.push(node)
+      }
+    } else {
+      nodesByGroup.set(group, [node])
+    }
+  }
+
+  let unnamedCounter = 1
+  const unnamedNets: NetDef[] = []
+  const namedNets = new Map<string, NetNode[]>()
+
+  for (const [group, nodes] of nodesByGroup.entries()) {
+    if (nodes.length === 0) {
+      continue
+    }
+
+    const names = [...(namesByGroup.get(group) ?? new Set<string>())]
+
+    if (names.length > 0) {
+      const name = names.slice().sort((left, right) => left.localeCompare(right))[0] ?? names[0]
+      const existing = namedNets.get(name)
+
+      if (existing) {
+        for (const node of nodes) {
+          if (!existing.some((entry) => entry.refDes === node.refDes && entry.pinNum === node.pinNum)) {
+            existing.push(node)
+          }
+        }
+      } else {
+        namedNets.set(name, [...nodes])
+      }
+
+      continue
+    }
+
+    unnamedNets.push({
+      name: `SCH_NET_${unnamedCounter++}`,
+      nodes,
+    })
+  }
+
+  return [
+    ...[...namedNets.entries()].map<NetDef>(([name, nodes]) => ({
+      name,
+      nodes,
+    })),
+    ...unnamedNets,
+  ]
+}
+
+export function parseKiCadSchematicSexpr(source: string): Netlist {
+  const tokens = tokenizeSexpr(source)
+
+  if (tokens.length === 0) {
+    throw new Error('The selected file is empty.')
+  }
+
+  try {
+    const forms = parseSexprTokens(tokens)
+    const rootForm = forms.find((form) => Array.isArray(form) && head(form) === 'kicad_sch')
+    const root = asList(rootForm)
+
+    if (!root) {
+      return parseKiCadSchematicSexprLoose(source)
+    }
+
+    const symbols = childrenByHead(root, 'symbol')
+    const components = symbols
+      .map<NetlistComponent>((symbol) => ({
+        refDes: propertyValue(symbol, 'Reference'),
+        value: propertyValue(symbol, 'Value'),
+        footprintHint: propertyValue(symbol, 'Footprint') || undefined,
+      }))
+      .filter((component) => component.refDes.length > 0 && !component.refDes.startsWith('#'))
+
+    if (components.length === 0) {
+      return parseKiCadSchematicSexprLoose(source)
+    }
+
+    const nets = extractSchematicNets(root, components)
+
+    return {
+      components,
+      nets,
+    }
+  } catch {
+    return parseKiCadSchematicSexprLoose(source)
+  }
+}
+
 export function parseKiCadNetlist(source: string): Netlist {
   const text = source.trimStart()
+
+  if (/^\(\s*kicad_sch\b/i.test(text) || /\(\s*kicad_sch\b/i.test(text)) {
+    return parseKiCadSchematicSexpr(source)
+  }
 
   if (text.startsWith('<')) {
     return parseKiCadNetlistXml(source)

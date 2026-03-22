@@ -53,7 +53,7 @@ function handleFileChange(event: Event) {
           New board
         </button>
         <button class="rounded-full border border-sky-300 bg-sky-50 px-4 py-2 text-sm text-sky-800 transition hover:border-sky-400 hover:bg-sky-100" @click="openImportDialog">
-          Import KiCad netlist
+          Import KiCad
         </button>
         <RouterLink
           v-if="online"
@@ -65,7 +65,7 @@ function handleFileChange(event: Event) {
         <input
           ref="fileInput"
           type="file"
-          accept=".xml,.net"
+          accept=".xml,.net,.kicad_sch"
           class="hidden"
           @change="handleFileChange"
         />
