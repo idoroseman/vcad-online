@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-import type { BoardState } from '../../lib/types'
+import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
 const props = defineProps<{
   board: BoardState
+  activeTool: ActiveTool
+  activeWireType: WireType
+  pendingLinkStart: { row: number; col: number } | null
+}>()
+
+const emit = defineEmits<{
+  placeHole: [row: number, col: number]
 }>()
 
 const pitch = 18
@@ -47,14 +54,19 @@ function updateCursorPosition(event: PointerEvent) {
     return
   }
 
-  const bounds = svgElement.value.getBoundingClientRect()
+  const matrix = svgElement.value.getScreenCTM()
 
-  if (bounds.width === 0 || bounds.height === 0) {
+  if (!matrix) {
     return
   }
 
-  const x = ((event.clientX - bounds.left) / bounds.width) * boardWidth.value
-  const y = ((event.clientY - bounds.top) / bounds.height) * boardHeight.value
+  const point = svgElement.value.createSVGPoint()
+  point.x = event.clientX
+  point.y = event.clientY
+  const svgPoint = point.matrixTransform(matrix.inverse())
+
+  const x = svgPoint.x
+  const y = svgPoint.y
   const row = Math.max(0, Math.min(props.board.rows - 1, Math.round((y - 32) / pitch)))
   const col = Math.max(0, Math.min(props.board.cols - 1, Math.round((x - 32) / pitch)))
 
@@ -64,29 +76,46 @@ function updateCursorPosition(event: PointerEvent) {
 function clearCursorPosition() {
   cursorPosition.value = null
 }
+
+function handleBoardClick() {
+  if (!cursorPosition.value || props.activeTool === 'inspect') {
+    return
+  }
+
+  emit('placeHole', cursorPosition.value.row, cursorPosition.value.col)
+}
 </script>
 
 <template>
   <div class="h-full rounded-[30px] border border-black/10 bg-white/70 p-3 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.5)] backdrop-blur sm:p-5">
     <div class="flex h-full flex-col rounded-[24px] bg-[radial-gradient(circle_at_top,#fff7ed,transparent_28%),linear-gradient(180deg,#fde68a_0%,#f3e2a6_100%)] p-3 sm:p-4">
-      <div class="mb-3 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.24em] text-stone-600">
-        <span>Editor Canvas</span>
-        <div class="flex flex-wrap items-center justify-end gap-2 text-right">
-          <span>{{ board.rows }} rows · {{ board.cols }} columns</span>
-          <span v-if="cursorPosition" class="rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
+      <div class="mb-3 flex min-h-8 items-center justify-between gap-3 text-xs uppercase tracking-[0.24em] text-stone-600">
+        <span class="shrink-0">Editor Canvas</span>
+        <div class="ml-auto flex min-w-0 flex-nowrap items-center justify-end gap-2 overflow-hidden text-right">
+          <span class="whitespace-nowrap">{{ board.rows }} rows · {{ board.cols }} columns</span>
+          <span v-if="cursorPosition" class="whitespace-nowrap rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}
+          </span>
+          <span v-if="activeTool !== 'inspect'" class="whitespace-nowrap rounded-full bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-700">
+            {{ activeTool }}{{ activeTool === 'wire' ? `:${activeWireType}` : '' }}
           </span>
         </div>
       </div>
 
       <div class="min-h-0 flex-1 overflow-auto rounded-[20px] border border-black/10 bg-[#f4ecce]">
-        <svg
-          ref="svgElement"
-          :viewBox="`0 0 ${boardWidth} ${boardHeight}`"
-          class="h-full min-h-[28rem] w-full cursor-crosshair"
-          @pointerleave="clearCursorPosition"
-          @pointermove="updateCursorPosition"
-        >
+        <div class="min-h-full min-w-full p-3">
+          <svg
+            ref="svgElement"
+            :viewBox="`0 0 ${boardWidth} ${boardHeight}`"
+            :width="boardWidth"
+            :height="boardHeight"
+            preserveAspectRatio="xMinYMin meet"
+            class="block"
+            :class="activeTool === 'inspect' ? 'cursor-crosshair' : 'cursor-cell'"
+            @click="handleBoardClick"
+            @pointerleave="clearCursorPosition"
+            @pointermove="updateCursorPosition"
+          >
           <rect x="0" y="0" :width="boardWidth" :height="boardHeight" fill="#efe0a8" />
 
           <g>
@@ -135,6 +164,18 @@ function clearCursorPosition() {
             />
           </g>
 
+          <g v-if="pendingLinkStart">
+            <circle
+              :cx="pointX(pendingLinkStart.col)"
+              :cy="pointY(pendingLinkStart.row)"
+              r="8.5"
+              fill="none"
+              stroke="#0284c7"
+              stroke-width="2"
+              stroke-dasharray="4 3"
+            />
+          </g>
+
           <g>
             <path
               v-for="link in board.links"
@@ -170,7 +211,8 @@ function clearCursorPosition() {
               </text>
             </g>
           </g>
-        </svg>
+          </svg>
+        </div>
       </div>
     </div>
   </div>

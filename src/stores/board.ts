@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { v4 as uuidv4 } from 'uuid'
 
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
-import type { BoardState, Link, StorageMode, Wire, WireType } from '../lib/types'
+import type { ActiveTool, BoardState, Link, StorageMode, Wire, WireType } from '../lib/types'
 
 function createBoardState(mode: StorageMode = 'local'): BoardState {
   return {
@@ -22,6 +22,9 @@ function createBoardState(mode: StorageMode = 'local'): BoardState {
 export const useBoardStore = defineStore('board', () => {
   const board = ref<BoardState>(loadGuestSession() ?? createBoardState())
   const online = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const activeTool = ref<ActiveTool>('inspect')
+  const activeWireType = ref<WireType>('input')
+  const pendingLinkStart = ref<{ row: number; col: number } | null>(null)
 
   const counts = computed(() => ({
     cuts: board.value.cuts.length,
@@ -38,32 +41,70 @@ export const useBoardStore = defineStore('board', () => {
     board.value.projectName = name.trim() || 'Untitled Stripboard'
   }
 
-  function addLink() {
-    const startRow = 4 + (board.value.links.length % 8)
-    const startCol = 6 + ((board.value.links.length * 5) % 42)
-
+  function createLink(fromRow: number, fromCol: number, toRow: number, toCol: number) {
     const link: Link = {
       id: uuidv4(),
-      fromRow: startRow,
-      fromCol: startCol,
-      toRow: Math.min(startRow + 3, board.value.rows - 1),
-      toCol: Math.min(startCol + 4, board.value.cols - 1),
+      fromRow,
+      fromCol,
+      toRow,
+      toCol,
       color: ['#0f766e', '#2563eb', '#dc2626', '#7c3aed'][board.value.links.length % 4],
     }
 
     board.value.links.push(link)
   }
 
-  function addWire(type: WireType = 'input') {
+  function createWire(row: number, col: number, type: WireType = 'input') {
     const wire: Wire = {
       id: uuidv4(),
-      row: 2 + (board.value.wires.length % 16),
-      col: Math.min(2 + board.value.wires.length * 3, board.value.cols - 1),
+      row,
+      col,
       signalName: `${type.toUpperCase()}_${board.value.wires.length + 1}`,
       type,
     }
 
     board.value.wires.push(wire)
+  }
+
+  function setActiveTool(tool: ActiveTool) {
+    activeTool.value = tool
+
+    if (tool !== 'link') {
+      pendingLinkStart.value = null
+    }
+  }
+
+  function setActiveWireType(type: WireType) {
+    activeWireType.value = type
+  }
+
+  function placeAtHole(row: number, col: number) {
+    if (activeTool.value === 'inspect') {
+      return
+    }
+
+    if (activeTool.value === 'wire') {
+      createWire(row, col, activeWireType.value)
+      return
+    }
+
+    if (!pendingLinkStart.value) {
+      pendingLinkStart.value = { row, col }
+      return
+    }
+
+    if (pendingLinkStart.value.row === row && pendingLinkStart.value.col === col) {
+      pendingLinkStart.value = null
+      return
+    }
+
+    createLink(pendingLinkStart.value.row, pendingLinkStart.value.col, row, col)
+    pendingLinkStart.value = null
+  }
+
+  function cancelPendingPlacement() {
+    pendingLinkStart.value = null
+    activeTool.value = 'inspect'
   }
 
   function setStorageMode(mode: StorageMode) {
@@ -106,10 +147,15 @@ export const useBoardStore = defineStore('board', () => {
     board,
     counts,
     online,
+    activeTool,
+    activeWireType,
+    pendingLinkStart,
     resetBoard,
     renameProject,
-    addLink,
-    addWire,
+    setActiveTool,
+    setActiveWireType,
+    placeAtHole,
+    cancelPendingPlacement,
     setStorageMode,
     loadCloudProject,
     clearGuestCopy,

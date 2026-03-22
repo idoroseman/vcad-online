@@ -11,7 +11,7 @@ import { useBoardStore } from '../stores/board'
 const boardStore = useBoardStore()
 const route = useRoute()
 
-const { board, counts, online } = storeToRefs(boardStore)
+const { board, counts, online, activeTool, activeWireType, pendingLinkStart } = storeToRefs(boardStore)
 
 if (typeof route.params.id === 'string' && route.params.id.length > 0) {
   boardStore.loadCloudProject(route.params.id)
@@ -39,18 +39,33 @@ function handleNewBoard() {
 <template>
   <div class="min-h-screen bg-transparent text-stone-900">
     <AppToolbar
+      :active-tool="activeTool"
       :online="online"
       :project-name="board.projectName"
       :storage-mode="board.storageMode"
       @rename="handleRename"
       @new-board="handleNewBoard"
-      @add-link="boardStore.addLink()"
-      @add-wire="boardStore.addWire()"
+      @set-tool="boardStore.setActiveTool"
     />
 
     <main class="grid min-h-[calc(100vh-115px)] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <InspectorPanel :board="board" :counts="counts" />
-      <BoardCanvas :board="board" />
+      <InspectorPanel
+        :active-tool="activeTool"
+        :active-wire-type="activeWireType"
+        :board="board"
+        :counts="counts"
+        :pending-link-start="pendingLinkStart"
+        @cancel-placement="boardStore.cancelPendingPlacement"
+        @set-tool="boardStore.setActiveTool"
+        @set-wire-type="boardStore.setActiveWireType"
+      />
+      <BoardCanvas
+        :active-tool="activeTool"
+        :active-wire-type="activeWireType"
+        :board="board"
+        :pending-link-start="pendingLinkStart"
+        @place-hole="boardStore.placeAtHole"
+      />
     </main>
 
     <StatusBar
