@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
+import {
+  STRIPBOARD_HOLE_PITCH_MM,
+  getAxialBodyGeometry,
+  getComponentBounds,
+  getComponentPinHoles,
+  getFootprint,
+  getRadialBodyGeometry,
+} from '../../lib/footprints'
 import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
-type SelectedItem = { kind: 'cut' | 'link' | 'wire'; id: string } | null
+type SelectedItem = { kind: 'cut' | 'component' | 'link' | 'wire'; id: string } | null
 
 type DragState =
+  | {
+      kind: 'component'
+      pointerId: number
+      originHole: { row: number; col: number }
+      lastHole: { row: number; col: number }
+    }
   | {
       kind: 'cut'
       pointerId: number
@@ -43,6 +57,7 @@ type DragState =
 const props = defineProps<{
   board: BoardState
   activeTool: ActiveTool
+  activeFootprintId: string
   activeWireType: WireType
   pendingLinkStart: { row: number; col: number } | null
   selectedItem: SelectedItem
@@ -50,8 +65,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   placeHole: [row: number, col: number]
+  setFootprint: [footprintId: string]
   setTool: [tool: ActiveTool]
   inspectHole: [row: number, col: number]
+  moveSelectedComponent: [row: number, col: number]
   moveSelectedCut: [row: number, col: number]
   moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
   moveSelectedWire: [row: number, col: number]
@@ -103,9 +120,16 @@ const stripSegments = computed(() => {
   })
 })
 const svgElement = ref<SVGSVGElement | null>(null)
+const addMenu = ref<HTMLDetailsElement | null>(null)
 const cursorPosition = ref<{ row: number; col: number } | null>(null)
 const dragState = ref<DragState | null>(null)
 const suppressClick = ref(false)
+
+const addOptions = [
+  { label: 'Axial', footprintId: 'resistor-axial-7' },
+  { label: 'Radial', footprintId: 'capacitor-radial-3' },
+  { label: 'IC', footprintId: 'dip-8' },
+]
 
 function pointX(col: number) {
   return 32 + col * pitch
@@ -142,6 +166,21 @@ function toolClasses(tool: ActiveTool) {
   return props.activeTool === tool
     ? 'inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-white'
     : 'inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700'
+}
+
+function addMenuClasses() {
+  return props.activeTool === 'component'
+    ? 'flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-white [&::-webkit-details-marker]:hidden'
+    : 'flex cursor-pointer list-none items-center gap-1.5 rounded-full border border-stone-300 bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700 [&::-webkit-details-marker]:hidden'
+}
+
+function selectAddOption(footprintId: string) {
+  emit('setFootprint', footprintId)
+  emit('setTool', 'component')
+
+  if (addMenu.value) {
+    addMenu.value.open = false
+  }
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -223,6 +262,20 @@ function clientPointToBoardPoint(clientX: number, clientY: number) {
 }
 
 function findItemAtPoint(x: number, y: number, row: number, col: number): SelectedItem {
+  const component = props.board.components.find((item) => {
+    const bounds = getComponentBounds(item)
+    const minX = pointX(bounds.minCol) - 14
+    const maxX = pointX(bounds.maxCol) + 14
+    const minY = pointY(bounds.minRow) - 14
+    const maxY = pointY(bounds.maxRow) + 14
+
+    return x >= minX && x <= maxX && y >= minY && y <= maxY
+  })
+
+  if (component) {
+    return { kind: 'component', id: component.id }
+  }
+
   const cut = props.board.cuts.find((item) => distance(x, y, pointX(item.col), pointY(item.row)) <= 10)
 
   if (cut) {
@@ -298,6 +351,12 @@ function updateCursorPosition(event: PointerEvent) {
 
   if (dragState.value.kind === 'cut') {
     emit('moveSelectedCut', hole.row, hole.col)
+    suppressClick.value = true
+    return
+  }
+
+  if (dragState.value.kind === 'component') {
+    emit('moveSelectedComponent', hole.row, hole.col)
     suppressClick.value = true
     return
   }
@@ -382,6 +441,15 @@ function handlePointerDown(event: PointerEvent) {
   }
 
   emit('selectItem', item)
+
+  if (item.kind === 'component') {
+    dragState.value = {
+      kind: 'component',
+      pointerId: event.pointerId,
+      originHole: { row: point.row, col: point.col },
+      lastHole: { row: point.row, col: point.col },
+    }
+  }
 
   if (item.kind === 'cut') {
     dragState.value = {
@@ -500,16 +568,142 @@ function handleBoardClick(event: MouseEvent) {
   emit('placeHole', hole.row, hole.col)
 }
 
-function isSelected(kind: 'cut' | 'link' | 'wire', id: string) {
+function isSelected(kind: 'cut' | 'component' | 'link' | 'wire', id: string) {
   return props.selectedItem?.kind === kind && props.selectedItem?.id === id
+}
+
+function axialAngle(component: BoardState['components'][number]) {
+  return component.rotation % 2 === 0 ? 0 : 90
+}
+
+function radialRadiusPx(component: BoardState['components'][number]) {
+  const body = getRadialBodyGeometry(component)
+
+  if (!body) {
+    return 0
+  }
+
+  return (body.radiusMm / STRIPBOARD_HOLE_PITCH_MM) * pitch
+}
+
+function radialLeadEnd(component: BoardState['components'][number], pinIndex: number) {
+  const body = getRadialBodyGeometry(component)
+
+  if (!body) {
+    return null
+  }
+
+  const leadEntry = body.leadEntries[pinIndex]
+
+  if (!leadEntry) {
+    return null
+  }
+
+  return {
+    x: pointX(leadEntry.col),
+    y: pointY(leadEntry.row),
+  }
+}
+
+function dipBodyRect(component: BoardState['components'][number]) {
+  if (getFootprint(component.footprintId).style !== 'dip') {
+    return null
+  }
+
+  const bounds = getComponentBounds(component)
+  const minX = pointX(bounds.minCol)
+  const maxX = pointX(bounds.maxCol)
+  const minY = pointY(bounds.minRow)
+  const maxY = pointY(bounds.maxRow)
+  const spanX = maxX - minX
+  const spanY = maxY - minY
+
+  if (spanY >= spanX) {
+    return {
+      x: minX + pitch * 0.52,
+      y: minY - pitch * 0.5,
+      width: Math.max(spanX - pitch * 1.04, pitch * 1.45),
+      height: spanY + pitch,
+    }
+  }
+
+  return {
+    x: minX - pitch * 0.5,
+    y: minY + pitch * 0.52,
+    width: spanX + pitch,
+    height: Math.max(spanY - pitch * 1.04, pitch * 1.45),
+  }
+}
+
+function dipPinAnchor(component: BoardState['components'][number], pin: { row: number; col: number }) {
+  const rect = dipBodyRect(component)
+
+  if (!rect) {
+    return null
+  }
+
+  const px = pointX(pin.col)
+  const py = pointY(pin.row)
+  const cx = rect.x + rect.width / 2
+  const cy = rect.y + rect.height / 2
+
+  if (component.rotation % 2 === 0) {
+    return {
+      x: px < cx ? rect.x : rect.x + rect.width,
+      y: py,
+    }
+  }
+
+  return {
+    x: px,
+    y: py < cy ? rect.y : rect.y + rect.height,
+  }
+}
+
+function dipPinOneMarker(component: BoardState['components'][number]) {
+  const rect = dipBodyRect(component)
+  const pin = getComponentPinHoles(component)[0]
+  const anchor = pin ? dipPinAnchor(component, pin) : null
+
+  if (!rect || !pin || !anchor) {
+    return null
+  }
+
+  const inset = 6
+
+  if (Math.abs(anchor.x - rect.x) < 0.5) {
+    return {
+      x: anchor.x + inset,
+      y: anchor.y,
+    }
+  }
+
+  if (Math.abs(anchor.x - (rect.x + rect.width)) < 0.5) {
+    return {
+      x: anchor.x - inset,
+      y: anchor.y,
+    }
+  }
+
+  if (Math.abs(anchor.y - rect.y) < 0.5) {
+    return {
+      x: anchor.x,
+      y: anchor.y + inset,
+    }
+  }
+
+  return {
+    x: anchor.x,
+    y: anchor.y - inset,
+  }
 }
 </script>
 
 <template>
   <div class="h-full rounded-[30px] border border-black/10 bg-white/70 p-3 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.5)] backdrop-blur sm:p-5">
     <div class="flex h-full flex-col rounded-[24px] bg-[radial-gradient(circle_at_top,#fff7ed,transparent_28%),linear-gradient(180deg,#fde68a_0%,#f3e2a6_100%)] p-3 sm:p-4">
-      <div class="mb-3 flex min-h-8 items-center justify-between gap-3 text-xs uppercase tracking-[0.24em] text-stone-600">
-        <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto">
+      <div class="mb-3 flex min-h-8 flex-wrap items-center justify-between gap-3 overflow-visible text-xs uppercase tracking-[0.24em] text-stone-600">
+        <div class="flex min-w-0 flex-wrap items-center gap-2 overflow-visible">
           <button :class="toolClasses('inspect')" @click="emit('setTool', 'inspect')">
             <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <circle cx="7" cy="7" r="4.5" />
@@ -542,9 +736,34 @@ function isSelected(kind: 'cut' | 'link' | 'wire', id: string) {
             </svg>
             <span>Wire</span>
           </button>
+          <details ref="addMenu" class="relative overflow-visible">
+            <summary :class="addMenuClasses()">
+              <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M8 3V13" stroke-linecap="round" />
+                <path d="M3 8H13" stroke-linecap="round" />
+              </svg>
+              <span>Add</span>
+              <svg viewBox="0 0 16 16" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M4 6L8 10L12 6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </summary>
+            <div class="absolute left-0 top-full z-20 mt-2 min-w-32 rounded-2xl border border-stone-200 bg-white p-1.5 shadow-[0_18px_40px_-22px_rgba(15,23,42,0.45)]">
+              <button
+                v-for="option in addOptions"
+                :key="option.footprintId"
+                class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-100"
+                @click.prevent="selectAddOption(option.footprintId)"
+              >
+                <span>{{ option.label }}</span>
+                <span v-if="activeFootprintId === option.footprintId && activeTool === 'component'" class="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500">
+                  Active
+                </span>
+              </button>
+            </div>
+          </details>
         </div>
 
-        <div class="ml-auto flex min-w-0 flex-nowrap items-center justify-end gap-2 overflow-hidden text-right">
+        <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 overflow-visible text-right">
           <span v-if="cursorPosition" class="whitespace-nowrap rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}
           </span>
@@ -627,6 +846,166 @@ function isSelected(kind: 'cut' | 'link' | 'wire', id: string) {
               stroke-width="2"
               stroke-dasharray="4 3"
             />
+          </g>
+
+          <g>
+            <g v-for="component in board.components" :key="component.id">
+              <g v-for="(pin, index) in getComponentPinHoles(component)" :key="`${component.id}-pin-${index}`">
+                <circle
+                  :cx="pointX(pin.col)"
+                  :cy="pointY(pin.row)"
+                  :r="isSelected('component', component.id) ? 5.2 : 4.2"
+                  :fill="getFootprint(component.footprintId).style === 'dip' && index === 0 ? '#f97316' : '#fff7ed'"
+                  :stroke="getFootprint(component.footprintId).style === 'dip' && index === 0 ? '#7c2d12' : isSelected('component', component.id) ? '#0f172a' : '#57534e'"
+                  stroke-width="1.4"
+                />
+              </g>
+
+              <g>
+                <template v-if="getFootprint(component.footprintId).style === 'axial' && getAxialBodyGeometry(component)">
+                  <line
+                    :x1="pointX(getComponentPinHoles(component)[0].col)"
+                    :y1="pointY(getComponentPinHoles(component)[0].row)"
+                    :x2="pointX(getAxialBodyGeometry(component)!.bodyStart.col)"
+                    :y2="pointY(getAxialBodyGeometry(component)!.bodyStart.row)"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#6b7280'"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                  />
+                  <line
+                    :x1="pointX(getAxialBodyGeometry(component)!.bodyEnd.col)"
+                    :y1="pointY(getAxialBodyGeometry(component)!.bodyEnd.row)"
+                    :x2="pointX(getComponentPinHoles(component)[1].col)"
+                    :y2="pointY(getComponentPinHoles(component)[1].row)"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#6b7280'"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                  />
+                  <rect
+                    :x="(pointX(getAxialBodyGeometry(component)!.bodyStart.col) + pointX(getAxialBodyGeometry(component)!.bodyEnd.col)) / 2 - (3 * pitch) / 2"
+                    :y="(pointY(getAxialBodyGeometry(component)!.bodyStart.row) + pointY(getAxialBodyGeometry(component)!.bodyEnd.row)) / 2 - pitch * 0.52"
+                    :width="3 * pitch"
+                    :height="pitch * 1.04"
+                    :rx="pitch * 0.52"
+                    :fill="isSelected('component', component.id) ? '#1f2937' : '#f5f5f4'"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#44403c'"
+                    stroke-width="1.6"
+                    opacity="0.97"
+                    :transform="`rotate(${axialAngle(component)} ${(pointX(getAxialBodyGeometry(component)!.bodyStart.col) + pointX(getAxialBodyGeometry(component)!.bodyEnd.col)) / 2} ${(pointY(getAxialBodyGeometry(component)!.bodyStart.row) + pointY(getAxialBodyGeometry(component)!.bodyEnd.row)) / 2})`"
+                  />
+                </template>
+                <template v-else-if="getFootprint(component.footprintId).style === 'radial' && getRadialBodyGeometry(component)">
+                  <line
+                    :x1="pointX(getComponentPinHoles(component)[0].col)"
+                    :y1="pointY(getComponentPinHoles(component)[0].row)"
+                    :x2="radialLeadEnd(component, 0)?.x ?? pointX(getComponentPinHoles(component)[0].col)"
+                    :y2="radialLeadEnd(component, 0)?.y ?? pointY(getComponentPinHoles(component)[0].row)"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#6b7280'"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <line
+                    :x1="pointX(getComponentPinHoles(component)[1].col)"
+                    :y1="pointY(getComponentPinHoles(component)[1].row)"
+                    :x2="radialLeadEnd(component, 1)?.x ?? pointX(getComponentPinHoles(component)[1].col)"
+                    :y2="radialLeadEnd(component, 1)?.y ?? pointY(getComponentPinHoles(component)[1].row)"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#6b7280'"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <circle
+                    :cx="pointX(getRadialBodyGeometry(component)!.center.col)"
+                    :cy="pointY(getRadialBodyGeometry(component)!.center.row)"
+                    :r="radialRadiusPx(component)"
+                    :fill="isSelected('component', component.id) ? '#1f2937' : '#f5f5f4'"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#44403c'"
+                    stroke-width="1.6"
+                    opacity="0.97"
+                  />
+                  <circle
+                    :cx="radialLeadEnd(component, 0)?.x ?? pointX(getComponentPinHoles(component)[0].col)"
+                    :cy="radialLeadEnd(component, 0)?.y ?? pointY(getComponentPinHoles(component)[0].row)"
+                    r="3.1"
+                    :fill="isSelected('component', component.id) ? '#fde68a' : '#f8fafc'"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#475569'"
+                    stroke-width="1.2"
+                  />
+                  <circle
+                    :cx="radialLeadEnd(component, 1)?.x ?? pointX(getComponentPinHoles(component)[1].col)"
+                    :cy="radialLeadEnd(component, 1)?.y ?? pointY(getComponentPinHoles(component)[1].row)"
+                    r="3.1"
+                    :fill="isSelected('component', component.id) ? '#fde68a' : '#f8fafc'"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#475569'"
+                    stroke-width="1.2"
+                  />
+                </template>
+                <template v-else-if="getFootprint(component.footprintId).style === 'dip' && dipBodyRect(component)">
+                  <line
+                    v-for="(pin, index) in getComponentPinHoles(component)"
+                    :key="`${component.id}-dip-lead-${index}`"
+                    :x1="pointX(pin.col)"
+                    :y1="pointY(pin.row)"
+                    :x2="dipPinAnchor(component, pin)?.x ?? pointX(pin.col)"
+                    :y2="dipPinAnchor(component, pin)?.y ?? pointY(pin.row)"
+                    :stroke="index === 0 ? '#f97316' : isSelected('component', component.id) ? '#ea580c' : '#6b7280'"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <rect
+                    :x="dipBodyRect(component)!.x"
+                    :y="dipBodyRect(component)!.y"
+                    :width="dipBodyRect(component)!.width"
+                    :height="dipBodyRect(component)!.height"
+                    rx="7"
+                    :fill="isSelected('component', component.id) ? '#1f2937' : '#f5f5f4'"
+                    :stroke="isSelected('component', component.id) ? '#ea580c' : '#44403c'"
+                    stroke-width="1.6"
+                    opacity="0.97"
+                  />
+                  <circle
+                    v-if="dipPinOneMarker(component)"
+                    :cx="dipPinOneMarker(component)!.x"
+                    :cy="dipPinOneMarker(component)!.y"
+                    r="3.2"
+                    fill="#f97316"
+                    stroke="#7c2d12"
+                    stroke-width="1"
+                  />
+                </template>
+                <rect
+                  v-else
+                  :x="pointX(getComponentBounds(component).minCol) - 11"
+                  :y="pointY(getComponentBounds(component).minRow) - 11"
+                  :width="(getComponentBounds(component).maxCol - getComponentBounds(component).minCol) * pitch + 22"
+                  :height="(getComponentBounds(component).maxRow - getComponentBounds(component).minRow) * pitch + 22"
+                  rx="10"
+                  :fill="isSelected('component', component.id) ? '#1f2937' : '#f5f5f4'"
+                  :stroke="isSelected('component', component.id) ? '#ea580c' : '#44403c'"
+                  stroke-width="1.6"
+                  opacity="0.95"
+                />
+                <text
+                  :x="(pointX(getComponentBounds(component).minCol) + pointX(getComponentBounds(component).maxCol)) / 2"
+                  :y="(pointY(getComponentBounds(component).minRow) + pointY(getComponentBounds(component).maxRow)) / 2 - 2"
+                  font-size="8.5"
+                  font-weight="700"
+                  text-anchor="middle"
+                  :fill="isSelected('component', component.id) ? '#fef3c7' : '#1c1917'"
+                >
+                  {{ component.refDes }}
+                </text>
+                <text
+                  :x="(pointX(getComponentBounds(component).minCol) + pointX(getComponentBounds(component).maxCol)) / 2"
+                  :y="(pointY(getComponentBounds(component).minRow) + pointY(getComponentBounds(component).maxRow)) / 2 + 8"
+                  font-size="7.5"
+                  font-weight="600"
+                  text-anchor="middle"
+                  :fill="isSelected('component', component.id) ? '#fde68a' : '#57534e'"
+                >
+                  {{ component.value || getFootprint(component.footprintId).label }}
+                </text>
+              </g>
+            </g>
           </g>
 
           <g>

@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import type { ActiveTool, BoardState, WireType } from '../../lib/types'
+import { footprintCatalog, getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch } from '../../lib/footprints'
+import type { ActiveTool, BoardState, PlacedComponent, WireType } from '../../lib/types'
 
 const props = defineProps<{
   board: BoardState
   activeTool: ActiveTool
+  activeFootprintId: string
   activeWireType: WireType
   pendingLinkStart: { row: number; col: number } | null
-  selectedItem: { kind: 'cut' | 'link' | 'wire'; id: string } | null
+  selectedItem: { kind: 'cut' | 'component' | 'link' | 'wire'; id: string } | null
   counts: {
     cuts: number
     links: number
@@ -18,20 +20,40 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
+  setFootprint: [footprintId: string]
   setWireType: [type: WireType]
   deleteSelected: []
   resizeBoard: [rows: number, cols: number]
+  moveSelectedComponent: [row: number, col: number]
   updateSelectedLinkColor: [color: string]
   moveSelectedCut: [row: number, col: number]
   moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
   moveSelectedWire: [row: number, col: number]
+  updateSelectedComponentBodyRadius: [bodyRadius: number]
+  updateSelectedComponentDipPins: [dipPins: number]
+  updateSelectedComponentDipWidth: [dipWidth: number]
+  updateSelectedComponentLeadPitch: [leadPitch: number]
+  updateSelectedComponentRefDes: [refDes: string]
+  updateSelectedComponentRotation: [rotation: PlacedComponent['rotation']]
+  updateSelectedComponentValue: [value: string]
   updateSelectedWireSignalName: [signalName: string]
   updateSelectedWireType: [type: WireType]
   updateSelectedWireNote: [note: string]
 }>()
 
 const wireTypes: WireType[] = ['input', 'output', 'bidirectional', 'power', 'gnd']
+const rotationOptions: PlacedComponent['rotation'][] = [0, 1, 2, 3]
 const activeTab = ref<'project' | 'properties'>('project')
+
+const activeFootprint = computed(() => getFootprint(props.activeFootprintId))
+
+const selectedComponent = computed(() => {
+  if (!props.selectedItem || props.selectedItem.kind !== 'component') {
+    return null
+  }
+
+  return props.board.components.find((item) => item.id === props.selectedItem?.id) ?? null
+})
 
 const selectedCut = computed(() => {
   if (!props.selectedItem || props.selectedItem.kind !== 'cut') {
@@ -78,6 +100,56 @@ function toCoordinate(value: string, fallback: number) {
 
 function toBoardSize(value: string, fallback: number) {
   const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
+
+function toRotation(value: string, fallback: PlacedComponent['rotation']) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (parsed === 0 || parsed === 1 || parsed === 2 || parsed === 3) {
+    return parsed
+  }
+
+  return fallback
+}
+
+function toLeadPitch(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
+
+function toDipPins(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
+
+function toDipWidth(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
+
+function toBodyDiameter(value: string, fallback: number) {
+  const parsed = Number.parseFloat(value)
 
   if (Number.isNaN(parsed)) {
     return fallback
@@ -164,6 +236,26 @@ function toBoardSize(value: string, fallback: number) {
         </div>
       </section>
 
+      <section v-if="activeTool === 'component'">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Footprint</p>
+        <div class="mt-3 space-y-2 text-sm">
+          <button
+            v-for="footprint in footprintCatalog"
+            :key="footprint.id"
+            class="w-full rounded-2xl border px-3 py-3 text-left"
+            :class="activeFootprintId === footprint.id ? 'border-stone-900 bg-stone-900 text-stone-50' : 'border-stone-200 bg-stone-50 text-stone-700'"
+            @click="$emit('setFootprint', footprint.id)"
+          >
+            <div class="font-semibold">{{ footprint.label }}</div>
+            <div class="mt-1 text-xs opacity-75">{{ footprint.prefix }} · {{ footprint.defaultValue }}</div>
+          </button>
+        </div>
+        <div class="mt-3 rounded-2xl bg-stone-100 px-3 py-3 text-sm text-stone-700">
+          <p class="font-medium text-stone-900">Current footprint</p>
+          <p class="mt-1">{{ activeFootprint.label }}</p>
+        </div>
+      </section>
+
       <section>
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Objects</p>
         <dl class="mt-3 space-y-2 text-sm text-stone-700">
@@ -233,6 +325,133 @@ function toBoardSize(value: string, fallback: number) {
             />
           </label>
         </div>
+      </section>
+
+      <section v-if="selectedComponent" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
+        <p class="font-semibold text-stone-900">Component Properties</p>
+
+        <div class="mt-3 rounded-2xl bg-white px-3 py-3">
+          <div class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Footprint</div>
+          <div class="mt-1 font-medium text-stone-900">{{ getFootprint(selectedComponent.footprintId).label }}</div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Row</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.rows - 1"
+              :value="selectedComponent.row"
+              @change="$emit('moveSelectedComponent', toCoordinate(($event.target as HTMLInputElement).value, selectedComponent.row), selectedComponent.col)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Col</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.cols - 1"
+              :value="selectedComponent.col"
+              @change="$emit('moveSelectedComponent', selectedComponent.row, toCoordinate(($event.target as HTMLInputElement).value, selectedComponent.col))"
+            />
+          </label>
+        </div>
+
+        <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Reference</label>
+        <input
+          type="text"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :value="selectedComponent.refDes"
+          @input="$emit('updateSelectedComponentRefDes', ($event.target as HTMLInputElement).value)"
+        />
+
+        <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Value</label>
+        <input
+          type="text"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :value="selectedComponent.value"
+          @input="$emit('updateSelectedComponentValue', ($event.target as HTMLInputElement).value)"
+        />
+
+        <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Rotation</label>
+        <select
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :value="selectedComponent.rotation"
+          @change="$emit('updateSelectedComponentRotation', toRotation(($event.target as HTMLSelectElement).value, selectedComponent.rotation))"
+        >
+          <option v-for="rotation in rotationOptions" :key="`rotation-${rotation}`" :value="rotation">
+            {{ rotation * 90 }}°
+          </option>
+        </select>
+
+        <label
+          v-if="getFootprint(selectedComponent.footprintId).style !== 'dip'"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
+          Pitch
+        </label>
+        <input
+          v-if="getFootprint(selectedComponent.footprintId).style !== 'dip'"
+          type="number"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :min="getFootprint(selectedComponent.footprintId).minLeadPitch ?? (getFootprint(selectedComponent.footprintId).style === 'radial' ? 1 : 3)"
+          :max="getFootprint(selectedComponent.footprintId).maxLeadPitch ?? 24"
+          :value="getLeadPitch(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultLeadPitch ?? (getFootprint(selectedComponent.footprintId).style === 'radial' ? 2 : 6)"
+          @input="$emit('updateSelectedComponentLeadPitch', toLeadPitch(($event.target as HTMLInputElement).value, getLeadPitch(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultLeadPitch ?? (getFootprint(selectedComponent.footprintId).style === 'radial' ? 2 : 6)))"
+        />
+
+        <label
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
+          Pins
+        </label>
+        <input
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          type="number"
+          step="2"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :min="getFootprint(selectedComponent.footprintId).minDipPins ?? 4"
+          :max="getFootprint(selectedComponent.footprintId).maxDipPins ?? 40"
+          :value="getDipPinCount(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipPins ?? 8"
+          @input="$emit('updateSelectedComponentDipPins', toDipPins(($event.target as HTMLInputElement).value, getDipPinCount(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipPins ?? 8))"
+        />
+
+        <label
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
+          Chip Width
+        </label>
+        <input
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          type="number"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :min="getFootprint(selectedComponent.footprintId).minDipWidth ?? 2"
+          :max="getFootprint(selectedComponent.footprintId).maxDipWidth ?? 12"
+          :value="getDipWidth(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipWidth ?? 3"
+          @input="$emit('updateSelectedComponentDipWidth', toDipWidth(($event.target as HTMLInputElement).value, getDipWidth(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipWidth ?? 3))"
+        />
+
+        <label
+          v-if="getFootprint(selectedComponent.footprintId).style === 'radial'"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
+          Diameter (mm)
+        </label>
+        <input
+          v-if="getFootprint(selectedComponent.footprintId).style === 'radial'"
+          type="number"
+          step="0.1"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :min="(getFootprint(selectedComponent.footprintId).minBodyRadius ?? 0.75) * 2"
+          :max="(getFootprint(selectedComponent.footprintId).maxBodyRadius ?? 4) * 2"
+          :value="(getBodyRadius(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultBodyRadius ?? 1.2) * 2"
+          @input="$emit('updateSelectedComponentBodyRadius', toBodyDiameter(($event.target as HTMLInputElement).value, (getBodyRadius(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultBodyRadius ?? 1.2) * 2) / 2)"
+        />
       </section>
 
       <section v-if="selectedLink" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">

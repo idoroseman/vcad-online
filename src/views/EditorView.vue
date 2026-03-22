@@ -12,7 +12,7 @@ import { useBoardStore } from '../stores/board'
 const boardStore = useBoardStore()
 const route = useRoute()
 
-const { board, counts, online, activeTool, activeWireType, pendingLinkStart, selectedItem } =
+const { board, counts, online, activeTool, activeFootprintId, activeWireType, pendingLinkStart, selectedItem } =
   storeToRefs(boardStore)
 
 if (typeof route.params.id === 'string' && route.params.id.length > 0) {
@@ -76,17 +76,27 @@ onUnmounted(() => {
     <main class="grid min-h-[calc(100vh-115px)] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <InspectorPanel
         :active-tool="activeTool"
+        :active-footprint-id="activeFootprintId"
         :active-wire-type="activeWireType"
         :board="board"
         :counts="counts"
         :pending-link-start="pendingLinkStart"
         :selected-item="selectedItem"
         @delete-selected="boardStore.deleteSelected"
+        @move-selected-component="boardStore.moveSelectedComponent"
         @move-selected-cut="boardStore.moveSelectedCut"
         @move-selected-link="boardStore.moveSelectedLink"
         @move-selected-wire="boardStore.moveSelectedWire"
         @resize-board="boardStore.resizeBoard"
+        @set-footprint="boardStore.setActiveFootprint"
+        @update-selected-component-body-radius="boardStore.updateSelectedComponentBodyRadius"
+        @update-selected-component-dip-pins="boardStore.updateSelectedComponentDipPins"
+        @update-selected-component-dip-width="boardStore.updateSelectedComponentDipWidth"
+        @update-selected-component-lead-pitch="boardStore.updateSelectedComponentLeadPitch"
         @set-wire-type="boardStore.setActiveWireType"
+        @update-selected-component-ref-des="boardStore.updateSelectedComponentRefDes"
+        @update-selected-component-rotation="boardStore.updateSelectedComponentRotation"
+        @update-selected-component-value="boardStore.updateSelectedComponentValue"
         @update-selected-link-color="boardStore.updateSelectedLinkColor"
         @update-selected-wire-note="boardStore.updateSelectedWireNote"
         @update-selected-wire-signal-name="boardStore.updateSelectedWireSignalName"
@@ -94,15 +104,18 @@ onUnmounted(() => {
       />
       <BoardCanvas
         :active-tool="activeTool"
+        :active-footprint-id="activeFootprintId"
         :active-wire-type="activeWireType"
         :board="board"
         :pending-link-start="pendingLinkStart"
         :selected-item="selectedItem"
         @inspect-hole="boardStore.inspectAtHole"
+        @move-selected-component="boardStore.moveSelectedComponent"
         @place-hole="boardStore.placeAtHole"
         @move-selected-cut="boardStore.moveSelectedCut"
         @move-selected-link="boardStore.moveSelectedLink"
         @move-selected-wire="boardStore.moveSelectedWire"
+        @set-footprint="boardStore.setActiveFootprint"
         @select-item="boardStore.setSelectedItem"
         @set-tool="boardStore.setActiveTool"
       />

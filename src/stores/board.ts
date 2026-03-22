@@ -2,11 +2,22 @@ import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { v4 as uuidv4 } from 'uuid'
 
+import {
+  footprintCatalog,
+  getBodyRadius,
+  getComponentBounds,
+  getComponentPinHoles,
+  getDipPinCount,
+  getDipWidth,
+  getFootprint,
+  getLeadPitch,
+} from '../lib/footprints'
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
-import type { ActiveTool, BoardState, Cut, Link, StorageMode, Wire, WireType } from '../lib/types'
+import type { ActiveTool, BoardState, Cut, Link, PlacedComponent, StorageMode, Wire, WireType } from '../lib/types'
 
 type SelectedItem =
   | { kind: 'cut'; id: string }
+  | { kind: 'component'; id: string }
   | { kind: 'link'; id: string }
   | { kind: 'wire'; id: string }
   | null
@@ -37,6 +48,7 @@ export const useBoardStore = defineStore('board', () => {
   const board = ref<BoardState>(loadGuestSession() ?? createBoardState())
   const online = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
   const activeTool = ref<ActiveTool>('inspect')
+  const activeFootprintId = ref(footprintCatalog[0].id)
   const activeWireType = ref<WireType>('input')
   const pendingLinkStart = ref<{ row: number; col: number } | null>(null)
   const selectedItem = ref<SelectedItem>(null)
@@ -53,6 +65,18 @@ export const useBoardStore = defineStore('board', () => {
       row: clamp(Math.round(row), 0, board.value.rows - 1),
       col: clamp(Math.round(col), 0, board.value.cols - 1),
     }
+  }
+
+  function isComponentWithinBoard(component: PlacedComponent, rows = board.value.rows, cols = board.value.cols) {
+    const bounds = getComponentBounds(component)
+
+    return (
+      bounds.minRow >= 0 &&
+      bounds.minCol >= 0 &&
+      bounds.maxRow <= rows - 1 &&
+      bounds.maxCol <= cols - 1 &&
+      getComponentPinHoles(component).every((pin) => isHoleWithinBoard(pin.row, pin.col, rows, cols))
+    )
   }
 
   function resetBoard() {
@@ -72,9 +96,7 @@ export const useBoardStore = defineStore('board', () => {
         isHoleWithinBoard(item.fromRow, item.fromCol, nextRows, nextCols) &&
         isHoleWithinBoard(item.toRow, item.toCol, nextRows, nextCols),
     )
-    board.value.components = board.value.components.filter((item) =>
-      isHoleWithinBoard(item.row, item.col, nextRows, nextCols),
-    )
+    board.value.components = board.value.components.filter((item) => isComponentWithinBoard(item, nextRows, nextCols))
 
     if (
       pendingLinkStart.value &&
@@ -91,6 +113,14 @@ export const useBoardStore = defineStore('board', () => {
       const cutExists = board.value.cuts.some((item) => item.id === selectedItem.value?.id)
 
       if (!cutExists) {
+        selectedItem.value = null
+      }
+    }
+
+    if (selectedItem.value?.kind === 'component') {
+      const componentExists = board.value.components.some((item) => item.id === selectedItem.value?.id)
+
+      if (!componentExists) {
         selectedItem.value = null
       }
     }
@@ -114,6 +144,12 @@ export const useBoardStore = defineStore('board', () => {
 
   function setSelectedItem(item: SelectedItem) {
     selectedItem.value = item
+  }
+
+  function setActiveFootprint(footprintId: string) {
+    activeFootprintId.value = footprintCatalog.some((item) => item.id === footprintId)
+      ? footprintId
+      : footprintCatalog[0].id
   }
 
   function renameProject(name: string) {
@@ -143,6 +179,30 @@ export const useBoardStore = defineStore('board', () => {
     }
 
     board.value.wires.push(wire)
+  }
+
+  function createComponent(row: number, col: number) {
+    const footprint = getFootprint(activeFootprintId.value)
+    const countForPrefix = board.value.components.filter((item) => item.refDes.startsWith(footprint.prefix)).length + 1
+    const component: PlacedComponent = {
+      id: uuidv4(),
+      footprintId: footprint.id,
+      refDes: `${footprint.prefix}${countForPrefix}`,
+      value: footprint.defaultValue,
+      row,
+      col,
+      rotation: 0,
+      leadPitch: footprint.defaultLeadPitch,
+      bodyRadius: footprint.defaultBodyRadius,
+      dipPins: footprint.defaultDipPins,
+      dipWidth: footprint.defaultDipWidth,
+    }
+
+    if (!isComponentWithinBoard(component)) {
+      return
+    }
+
+    board.value.components.push(component)
   }
 
   function toggleCut(row: number, col: number) {
@@ -188,6 +248,11 @@ export const useBoardStore = defineStore('board', () => {
       return
     }
 
+    if (activeTool.value === 'component') {
+      createComponent(row, col)
+      return
+    }
+
     if (activeTool.value === 'cut') {
       toggleCut(row, col)
       return
@@ -208,6 +273,14 @@ export const useBoardStore = defineStore('board', () => {
   }
 
   function inspectAtHole(row: number, col: number) {
+    const component = board.value.components.find((item) =>
+      getComponentPinHoles(item).some((pin) => pin.row === row && pin.col === col),
+    )
+    if (component) {
+      selectedItem.value = { kind: 'component', id: component.id }
+      return
+    }
+
     const cut = board.value.cuts.find((item) => item.row === row && item.col === col)
     if (cut) {
       selectedItem.value = { kind: 'cut', id: cut.id }
@@ -239,6 +312,10 @@ export const useBoardStore = defineStore('board', () => {
 
     if (selectedItem.value.kind === 'cut') {
       board.value.cuts = board.value.cuts.filter((item) => item.id !== selectedItem.value?.id)
+    }
+
+    if (selectedItem.value.kind === 'component') {
+      board.value.components = board.value.components.filter((item) => item.id !== selectedItem.value?.id)
     }
 
     if (selectedItem.value.kind === 'link') {
@@ -332,6 +409,32 @@ export const useBoardStore = defineStore('board', () => {
     cut.col = nextHole.col
   }
 
+  function moveSelectedComponent(row: number, col: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const nextHole = normalizeHole(row, col)
+    const nextComponent = {
+      ...component,
+      row: nextHole.row,
+      col: nextHole.col,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.row = nextHole.row
+    component.col = nextHole.col
+  }
+
   function moveSelectedWire(row: number, col: number) {
     if (!selectedItem.value || selectedItem.value.kind !== 'wire') {
       return
@@ -393,6 +496,173 @@ export const useBoardStore = defineStore('board', () => {
     link.toCol = nextTo.col
   }
 
+  function updateSelectedComponentRefDes(refDes: string) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    component.refDes = refDes.trim() || component.refDes
+  }
+
+  function updateSelectedComponentValue(value: string) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    component.value = value
+  }
+
+  function updateSelectedComponentRotation(rotation: PlacedComponent['rotation']) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      rotation,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.rotation = rotation
+  }
+
+  function updateSelectedComponentLeadPitch(leadPitch: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style === 'dip') {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      leadPitch,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.leadPitch = getLeadPitch(nextComponent) ?? footprint.defaultLeadPitch
+  }
+
+  function updateSelectedComponentBodyRadius(bodyRadius: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style !== 'radial') {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      bodyRadius,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.bodyRadius = getBodyRadius(nextComponent) ?? footprint.defaultBodyRadius
+  }
+
+  function updateSelectedComponentDipPins(dipPins: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style !== 'dip') {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      dipPins,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.dipPins = getDipPinCount(nextComponent) ?? footprint.defaultDipPins
+  }
+
+  function updateSelectedComponentDipWidth(dipWidth: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style !== 'dip') {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      dipWidth,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.dipWidth = getDipWidth(nextComponent) ?? footprint.defaultDipWidth
+  }
+
   function cancelPendingPlacement() {
     pendingLinkStart.value = null
     activeTool.value = 'inspect'
@@ -439,12 +709,14 @@ export const useBoardStore = defineStore('board', () => {
     counts,
     online,
     activeTool,
+    activeFootprintId,
     activeWireType,
     pendingLinkStart,
     selectedItem,
     resetBoard,
     resizeBoard,
     setSelectedItem,
+    setActiveFootprint,
     renameProject,
     setActiveTool,
     setActiveWireType,
@@ -453,9 +725,17 @@ export const useBoardStore = defineStore('board', () => {
     inspectAtHole,
     deleteSelected,
     updateSelectedLinkColor,
+    moveSelectedComponent,
     moveSelectedCut,
     moveSelectedWire,
     moveSelectedLink,
+    updateSelectedComponentRefDes,
+    updateSelectedComponentBodyRadius,
+    updateSelectedComponentDipPins,
+    updateSelectedComponentDipWidth,
+    updateSelectedComponentLeadPitch,
+    updateSelectedComponentValue,
+    updateSelectedComponentRotation,
     updateSelectedWireSignalName,
     updateSelectedWireType,
     updateSelectedWireNote,

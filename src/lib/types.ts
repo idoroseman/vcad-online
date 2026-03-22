@@ -1,6 +1,6 @@
 export type StorageMode = 'local' | 'cloud'
 export type WireType = 'power' | 'gnd' | 'input' | 'output' | 'bidirectional'
-export type ActiveTool = 'inspect' | 'link' | 'wire' | 'cut'
+export type ActiveTool = 'inspect' | 'link' | 'wire' | 'cut' | 'component'
 
 export interface Cut {
   id: string
@@ -34,6 +34,10 @@ export interface PlacedComponent {
   row: number
   col: number
   rotation: 0 | 1 | 2 | 3
+  leadPitch?: number
+  bodyRadius?: number
+  dipPins?: number
+  dipWidth?: number
 }
 
 export interface NetNode {
