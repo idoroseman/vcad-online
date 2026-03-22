@@ -10,7 +10,7 @@ import {
   getPinLayout,
   getRadialBodyGeometry,
 } from '../../lib/footprints'
-import { buildBoardConnectivity, buildNetNamesByConnectivityGroup, computeRatsnest } from '../../lib/connectivity'
+import { buildBoardConnectivity, buildNetNamesByConnectivityGroup, computeRatsnest, computeShortCircuits } from '../../lib/connectivity'
 import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
 type SelectedItem = { kind: 'cut' | 'component' | 'link' | 'wire'; id: string } | null
@@ -89,6 +89,12 @@ const holes = computed(() =>
   rows.value.flatMap((row) => cols.value.map((col) => ({ row, col, key: `${row}-${col}` }))),
 )
 const ratsnestSegments = computed(() => computeRatsnest(props.board))
+const shortCircuitSegments = computed(() => computeShortCircuits(props.board))
+const unroutedCount = computed(() => ratsnestSegments.value.length)
+const shortCount = computed(() => {
+  const pairs = new Set(shortCircuitSegments.value.map((segment) => segment.netName))
+  return pairs.size
+})
 const stripSegments = computed(() => {
   const cutsByRow = new Map<number, number[]>()
 
@@ -128,6 +134,7 @@ const svgElement = ref<SVGSVGElement | null>(null)
 const addMenu = ref<HTMLDetailsElement | null>(null)
 const cursorPosition = ref<{ row: number; col: number } | null>(null)
 const hoveredLinkId = ref<string | null>(null)
+const hoveredStripKey = ref<string | null>(null)
 const dragState = ref<DragState | null>(null)
 const suppressClick = ref(false)
 const connectivity = computed(() => buildBoardConnectivity(props.board))
@@ -173,7 +180,52 @@ const hoveredLinkNetName = computed(() => {
 
   return [...netNames].join(' / ')
 })
-const hoveredNetName = computed(() => hoveredPinNetName.value ?? hoveredLinkNetName.value)
+const hoveredStripNetName = computed(() => {
+  const key = hoveredStripKey.value
+  if (!key) return null
+  const seg = stripSegments.value.find((s) => s.key === key)
+  if (!seg) return null
+  const groupKey = connectivity.value.groupFor(seg.row, seg.startCol)
+  const names = netNamesByGroup.value.get(groupKey)
+  return names ? [...names].join(' / ') : null
+})
+
+const hoveredNetName = computed(() => hoveredPinNetName.value ?? hoveredLinkNetName.value ?? hoveredStripNetName.value)
+
+const hoveredNetCount = computed(() => {
+  if (hoveredGroupKey.value) {
+    const names = netNamesByGroup.value.get(hoveredGroupKey.value)
+    return names ? names.size : 0
+  }
+
+  if (hoveredLinkId.value) {
+    const link = props.board.links.find((item) => item.id === hoveredLinkId.value)
+
+    if (!link) {
+      return 0
+    }
+
+    const fromGroup = connectivity.value.groupFor(link.fromRow, link.fromCol)
+    const toGroup = connectivity.value.groupFor(link.toRow, link.toCol)
+    const netNames = new Set<string>([
+      ...(netNamesByGroup.value.get(fromGroup) ?? new Set<string>()),
+      ...(netNamesByGroup.value.get(toGroup) ?? new Set<string>()),
+    ])
+
+    return netNames.size
+  }
+
+  if (hoveredStripKey.value) {
+    const seg = stripSegments.value.find((s) => s.key === hoveredStripKey.value)
+    if (seg) {
+      const groupKey = connectivity.value.groupFor(seg.row, seg.startCol)
+      const names = netNamesByGroup.value.get(groupKey)
+      return names ? names.size : 0
+    }
+  }
+
+  return 0
+})
 
 const addOptions = [
   { label: 'Axial', footprintId: 'resistor-axial-7' },
@@ -874,11 +926,24 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
         </div>
 
         <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 overflow-visible text-right">
-          <span v-if="hoveredNetName" class="whitespace-nowrap rounded-full bg-sky-100 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-sky-900">
+          <span
+            v-if="hoveredNetName"
+            class="whitespace-nowrap rounded-full px-3 py-1 text-[10px] font-semibold tracking-[0.16em]"
+            :class="hoveredNetCount > 1 ? 'bg-red-100 text-red-900' : 'bg-sky-100 text-sky-900'"
+          >
             {{ hoveredNetName }}
           </span>
           <span v-if="cursorPosition" class="whitespace-nowrap rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}
+          </span>
+          <span
+            v-if="unroutedCount > 0 || shortCount > 0"
+            class="whitespace-nowrap rounded-full px-3 py-1 text-[10px] font-semibold tracking-[0.16em]"
+            :class="shortCount > 0 ? 'bg-red-100 text-red-900' : 'bg-amber-100 text-amber-900'"
+          >
+            <template v-if="unroutedCount > 0">{{ unroutedCount }} unrouted</template>
+            <template v-if="unroutedCount > 0 && shortCount > 0"> · </template>
+            <template v-if="shortCount > 0">{{ shortCount }} short{{ shortCount === 1 ? '' : 's' }}</template>
           </span>
           <span class="whitespace-nowrap">{{ board.rows }} rows · {{ board.cols }} columns</span>
         </div>
@@ -912,8 +977,11 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
               :width="stripWidth(segment.startCol, segment.endCol)"
               height="10"
               rx="5"
-              fill="#bc6c25"
-              opacity="0.78"
+              :fill="hoveredStripKey === segment.key ? '#d4a046' : '#bc6c25'"
+              :opacity="hoveredStripKey === segment.key ? '0.95' : '0.78'"
+              style="cursor: default"
+              @pointerenter="hoveredStripKey = segment.key"
+              @pointerleave="hoveredStripKey = null"
             />
           </g>
 
@@ -1156,6 +1224,33 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                 :cy="pointY(segment.to.row)"
                 r="2.4"
                 fill="#0ea5e9"
+              />
+            </g>
+          </g>
+
+          <g v-if="props.showRatsnest && shortCircuitSegments.length" opacity="0.9">
+            <g v-for="(segment, index) in shortCircuitSegments" :key="`short-${segment.netName}-${segment.from.row}-${segment.from.col}-${segment.to.row}-${segment.to.col}-${index}`">
+              <line
+                :x1="pointX(segment.from.col)"
+                :y1="pointY(segment.from.row)"
+                :x2="pointX(segment.to.col)"
+                :y2="pointY(segment.to.row)"
+                stroke="#ef4444"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-dasharray="5 4"
+              />
+              <circle
+                :cx="pointX(segment.from.col)"
+                :cy="pointY(segment.from.row)"
+                r="3"
+                fill="#ef4444"
+              />
+              <circle
+                :cx="pointX(segment.to.col)"
+                :cy="pointY(segment.to.row)"
+                r="3"
+                fill="#ef4444"
               />
             </g>
           </g>

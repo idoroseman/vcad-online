@@ -3,6 +3,7 @@ import type { BoardState, NetDef } from './types'
 
 export interface RatsnestSegment {
   netName: string
+  short?: boolean
   from: {
     row: number
     col: number
@@ -230,6 +231,114 @@ function distanceSquared(
   const deltaCol = left.col - right.col
 
   return deltaRow * deltaRow + deltaCol * deltaCol
+}
+
+export function computeShortCircuits(board: BoardState): RatsnestSegment[] {
+  if (!board.netlist) {
+    return []
+  }
+
+  const connectivity = buildBoardConnectivity(board)
+  const componentsByRefDes = new Map(board.components.map((component) => [normalizeName(component.refDes), component]))
+
+  // group → Array<{ row, col, netName }>
+  const pinsByGroup = new Map<string, Array<{ row: number; col: number; netName: string }>>()
+
+  for (const net of board.netlist.nets) {
+    const netName = net.name.trim()
+
+    if (!netName) {
+      continue
+    }
+
+    for (const node of net.nodes) {
+      const component = componentsByRefDes.get(normalizeName(node.refDes))
+
+      if (!component) {
+        continue
+      }
+
+      const pinIndex = getPinIndexForPinNumber(component, node.pinNum)
+
+      if (pinIndex === null) {
+        continue
+      }
+
+      const hole = getComponentPinHoles(component)[pinIndex]
+
+      if (!hole) {
+        continue
+      }
+
+      const group = connectivity.groupFor(hole.row, hole.col)
+      const existing = pinsByGroup.get(group)
+
+      const entry = { row: hole.row, col: hole.col, netName }
+
+      if (existing) {
+        existing.push(entry)
+      } else {
+        pinsByGroup.set(group, [entry])
+      }
+    }
+  }
+
+  const segments: RatsnestSegment[] = []
+
+  for (const pins of pinsByGroup.values()) {
+    // Find distinct nets in this group
+    const nets = new Set(pins.map((pin) => pin.netName))
+
+    if (nets.size < 2) {
+      continue
+    }
+
+    // Build a minimal spanning tree over all shorted pins
+    const placed = [pins[0]]
+    const remaining = pins.slice(1)
+
+    while (remaining.length > 0) {
+      let bestScore = Number.POSITIVE_INFINITY
+      let bestFrom = placed[0]
+      let bestToIndex = 0
+
+      for (const from of placed) {
+        for (let index = 0; index < remaining.length; index += 1) {
+          const to = remaining[index]
+
+          if (to === undefined) {
+            continue
+          }
+
+          const score = distanceSquared(from, to)
+
+          if (score < bestScore) {
+            bestScore = score
+            bestFrom = from
+            bestToIndex = index
+          }
+        }
+      }
+
+      const bestTo = remaining[bestToIndex]
+
+      if (!bestTo) {
+        break
+      }
+
+      segments.push({
+        netName: `${bestFrom.netName}/${bestTo.netName}`,
+        short: true,
+        from: { row: bestFrom.row, col: bestFrom.col },
+        to: { row: bestTo.row, col: bestTo.col },
+      })
+
+      placed.push(bestTo)
+      remaining.splice(bestToIndex, 1)
+    }
+  }
+
+  return segments
 }
 
 export function computeRatsnest(board: BoardState): RatsnestSegment[] {
