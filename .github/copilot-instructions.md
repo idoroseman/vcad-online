@@ -1,0 +1,6 @@
+- Prefer focused, incremental changes that preserve the editor-first workflow.
+- Treat offline mode as one current working project only; do not add a local multi-project manager unless explicitly requested.
+- Keep cloud project features secondary to the editor surface.
+- Use Vue 3 Composition API with TypeScript and Pinia stores.
+- Preserve the terminology: links are on-board jumpers, wires are external signal connections.
+- Avoid dark-mode-first visual choices; maintain the warm stripboard-inspired palette unless the design direction changes.

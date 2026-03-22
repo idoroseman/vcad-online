@@ -1,0 +1,46 @@
+# vCad Online
+
+vCad Online is a Vue 3 stripboard or veroboard layout editor inspired by VeeCAD, with an editor-first workflow.
+
+## Current Implementation
+
+- Vue 3 + TypeScript + Vite
+- Pinia store for board state
+- Vue Router with editor-first navigation
+- Single offline working project stored in browser local storage
+- Secondary projects view for cloud-loaded work
+- Initial stripboard canvas with copper strips, links, and external wires
+
+## Routes
+
+- `/` opens the editor immediately
+- `/projects` is the cloud projects screen
+- `/login` is the placeholder sign-in view
+- `/editor/:id` loads a named cloud project into the editor shell
+
+## Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the dev server:
+
+```bash
+npm run dev
+```
+
+Create a production build:
+
+```bash
+npm run build
+```
+
+## Near-Term Scope
+
+- KiCad schematic and netlist import
+- Interactive cut, link, and wire placement tools
+- Projects backed by Firebase for signed-in users
+- Print layout and export flows
