@@ -40,7 +40,22 @@ npm run build
 
 ## Near-Term Scope
 
-- KiCad schematic and netlist import
+- KiCad XML netlist import
 - Interactive cut, link, and wire placement tools
 - Projects backed by Firebase for signed-in users
 - Print layout and export flows
+
+## KiCad Import
+
+The editor can now import KiCad exported netlists from the toolbar.
+
+Current support:
+
+- KiCad exported XML netlists
+- KiCad S-expression netlists
+- Nets and component references are loaded into the board state
+- Ratsnest overlay uses the imported nets immediately
+
+Current limitation:
+
+- Native `.kicad_sch` schematic parsing is not implemented yet

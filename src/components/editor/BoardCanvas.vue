@@ -9,6 +9,7 @@ import {
   getFootprint,
   getRadialBodyGeometry,
 } from '../../lib/footprints'
+import { computeRatsnest } from '../../lib/connectivity'
 import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
 type SelectedItem = { kind: 'cut' | 'component' | 'link' | 'wire'; id: string } | null
@@ -84,6 +85,7 @@ const cols = computed(() => Array.from({ length: props.board.cols }, (_, index) 
 const holes = computed(() =>
   rows.value.flatMap((row) => cols.value.map((col) => ({ row, col, key: `${row}-${col}` }))),
 )
+const ratsnestSegments = computed(() => computeRatsnest(props.board))
 const stripSegments = computed(() => {
   const cutsByRow = new Map<number, number[]>()
 
@@ -1005,6 +1007,33 @@ function dipPinOneMarker(component: BoardState['components'][number]) {
                   {{ component.value || getFootprint(component.footprintId).label }}
                 </text>
               </g>
+            </g>
+          </g>
+
+          <g v-if="ratsnestSegments.length" opacity="0.82">
+            <g v-for="(segment, index) in ratsnestSegments" :key="`${segment.netName}-${segment.from.row}-${segment.from.col}-${segment.to.row}-${segment.to.col}-${index}`">
+              <line
+                :x1="pointX(segment.from.col)"
+                :y1="pointY(segment.from.row)"
+                :x2="pointX(segment.to.col)"
+                :y2="pointY(segment.to.row)"
+                stroke="#0ea5e9"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-dasharray="5 4"
+              />
+              <circle
+                :cx="pointX(segment.from.col)"
+                :cy="pointY(segment.from.row)"
+                r="2.4"
+                fill="#0ea5e9"
+              />
+              <circle
+                :cx="pointX(segment.to.col)"
+                :cy="pointY(segment.to.row)"
+                r="2.4"
+                fill="#0ea5e9"
+              />
             </g>
           </g>
 

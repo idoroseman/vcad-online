@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 const props = defineProps<{
@@ -8,12 +8,30 @@ const props = defineProps<{
   storageMode: 'local' | 'cloud'
 }>()
 
-defineEmits<{
+const storageLabel = computed(() => (props.storageMode === 'cloud' ? 'Cloud project' : 'Offline working copy'))
+const fileInput = ref<HTMLInputElement | null>(null)
+
+const emit = defineEmits<{
   rename: []
   newBoard: []
+  importNetlist: [file: File]
 }>()
 
-const storageLabel = computed(() => (props.storageMode === 'cloud' ? 'Cloud project' : 'Offline working copy'))
+function openImportDialog() {
+  fileInput.value?.click()
+}
+
+function handleFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+
+  if (!file) {
+    return
+  }
+
+  emit('importNetlist', file)
+  input.value = ''
+}
 </script>
 
 <template>
@@ -34,6 +52,9 @@ const storageLabel = computed(() => (props.storageMode === 'cloud' ? 'Cloud proj
         <button class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50" @click="$emit('newBoard')">
           New board
         </button>
+        <button class="rounded-full border border-sky-300 bg-sky-50 px-4 py-2 text-sm text-sky-800 transition hover:border-sky-400 hover:bg-sky-100" @click="openImportDialog">
+          Import KiCad netlist
+        </button>
         <RouterLink
           v-if="online"
           class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50"
@@ -41,6 +62,13 @@ const storageLabel = computed(() => (props.storageMode === 'cloud' ? 'Cloud proj
         >
           Projects
         </RouterLink>
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".xml,.net"
+          class="hidden"
+          @change="handleFileChange"
+        />
       </div>
     </div>
   </header>

@@ -37,6 +37,18 @@ function handleNewBoard() {
   }
 }
 
+async function handleImportNetlist(file: File) {
+  try {
+    const source = await file.text()
+    const netlist = boardStore.importKiCadNetlist(source)
+
+    window.alert(`Imported ${netlist.nets.length} nets and ${netlist.components.length} components from ${file.name}.`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Import failed.'
+    window.alert(message)
+  }
+}
+
 function handleKeyDown(event: KeyboardEvent) {
   if (activeTool.value !== 'inspect') {
     return
@@ -69,6 +81,7 @@ onUnmounted(() => {
       :online="online"
       :project-name="board.projectName"
       :storage-mode="board.storageMode"
+      @import-netlist="handleImportNetlist"
       @rename="handleRename"
       @new-board="handleNewBoard"
     />

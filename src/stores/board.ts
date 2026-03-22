@@ -12,8 +12,9 @@ import {
   getFootprint,
   getLeadPitch,
 } from '../lib/footprints'
+import { parseKiCadNetlist } from '../lib/kicad-netlist'
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
-import type { ActiveTool, BoardState, Cut, Link, PlacedComponent, StorageMode, Wire, WireType } from '../lib/types'
+import type { ActiveTool, BoardState, Cut, Link, Netlist, PlacedComponent, StorageMode, Wire, WireType } from '../lib/types'
 
 type SelectedItem =
   | { kind: 'cut'; id: string }
@@ -28,6 +29,10 @@ function clamp(value: number, min: number, max: number) {
 
 function isHoleWithinBoard(row: number, col: number, rows: number, cols: number) {
   return row >= 0 && row < rows && col >= 0 && col < cols
+}
+
+function normalizeRefDes(value: string) {
+  return value.trim().toUpperCase()
 }
 
 function createBoardState(mode: StorageMode = 'local'): BoardState {
@@ -77,6 +82,141 @@ export const useBoardStore = defineStore('board', () => {
       bounds.maxCol <= cols - 1 &&
       getComponentPinHoles(component).every((pin) => isHoleWithinBoard(pin.row, pin.col, rows, cols))
     )
+  }
+
+  function componentsOverlap(left: PlacedComponent, right: PlacedComponent) {
+    const leftBounds = getComponentBounds(left)
+    const rightBounds = getComponentBounds(right)
+
+    return !(
+      leftBounds.maxRow < rightBounds.minRow ||
+      leftBounds.minRow > rightBounds.maxRow ||
+      leftBounds.maxCol < rightBounds.minCol ||
+      leftBounds.minCol > rightBounds.maxCol
+    )
+  }
+
+  function parseDipPinsHint(footprintHint: string | undefined) {
+    if (!footprintHint) {
+      return undefined
+    }
+
+    const match = footprintHint.match(/(?:dip|pdip|dil)[-_ ]?(\d+)/i) ?? footprintHint.match(/(\d+)\s*pin/i)
+
+    if (!match || !match[1]) {
+      return undefined
+    }
+
+    const parsed = Number.parseInt(match[1], 10)
+
+    if (Number.isNaN(parsed)) {
+      return undefined
+    }
+
+    return parsed
+  }
+
+  function selectFootprintForImportedComponent(refDes: string, footprintHint?: string) {
+    const normalizedRef = normalizeRefDes(refDes)
+    const hint = footprintHint?.toLowerCase() ?? ''
+
+    if (hint.includes('dip') || hint.includes('pdip') || hint.includes('dil') || normalizedRef.startsWith('U')) {
+      return 'dip-8'
+    }
+
+    if (normalizedRef.startsWith('C')) {
+      return 'capacitor-radial-3'
+    }
+
+    return 'resistor-axial-7'
+  }
+
+  function findPlacementSpot(candidate: PlacedComponent) {
+    const rowStep = 4
+    const colStep = 8
+
+    for (let row = 1; row < board.value.rows; row += rowStep) {
+      for (let col = 1; col < board.value.cols; col += colStep) {
+        const positioned = {
+          ...candidate,
+          row,
+          col,
+        }
+
+        if (!isComponentWithinBoard(positioned)) {
+          continue
+        }
+
+        const collision = board.value.components.some((existing) => componentsOverlap(positioned, existing))
+
+        if (!collision) {
+          return { row, col }
+        }
+      }
+    }
+
+    return null
+  }
+
+  function createPlacedImportedComponent(refDes: string, value: string, footprintHint?: string) {
+    const footprintId = selectFootprintForImportedComponent(refDes, footprintHint)
+    const footprint = getFootprint(footprintId)
+    const parsedDipPins = parseDipPinsHint(footprintHint)
+    const component: PlacedComponent = {
+      id: uuidv4(),
+      footprintId,
+      refDes: refDes.trim(),
+      value: value.trim() || footprint.defaultValue,
+      row: 0,
+      col: 0,
+      rotation: 0,
+      leadPitch: footprint.defaultLeadPitch,
+      bodyRadius: footprint.defaultBodyRadius,
+      dipPins: footprint.style === 'dip' ? parsedDipPins ?? footprint.defaultDipPins : footprint.defaultDipPins,
+      dipWidth: footprint.defaultDipWidth,
+    }
+
+    const placement = findPlacementSpot(component)
+
+    if (!placement) {
+      return null
+    }
+
+    component.row = placement.row
+    component.col = placement.col
+    return component
+  }
+
+  function syncPlacedComponentsFromNetlist(netlist: Netlist) {
+    const existingByRef = new Map(
+      board.value.components.map((component) => [normalizeRefDes(component.refDes), component]),
+    )
+
+    for (const imported of netlist.components) {
+      const normalizedRef = normalizeRefDes(imported.refDes)
+
+      if (!normalizedRef) {
+        continue
+      }
+
+      const existing = existingByRef.get(normalizedRef)
+
+      if (existing) {
+        if (imported.value.trim().length > 0) {
+          existing.value = imported.value.trim()
+        }
+        continue
+      }
+
+      const created = createPlacedImportedComponent(imported.refDes, imported.value, imported.footprintHint)
+
+      if (!created) {
+        continue
+      }
+
+      board.value.components.push(created)
+      existingByRef.set(normalizedRef, created)
+    }
   }
 
   function resetBoard() {
@@ -154,6 +294,17 @@ export const useBoardStore = defineStore('board', () => {
 
   function renameProject(name: string) {
     board.value.projectName = name.trim() || 'Untitled Stripboard'
+  }
+
+  function setNetlist(netlist: Netlist | null) {
+    board.value.netlist = netlist
+  }
+
+  function importKiCadNetlist(source: string) {
+    const netlist = parseKiCadNetlist(source)
+    board.value.netlist = netlist
+    syncPlacedComponentsFromNetlist(netlist)
+    return netlist
   }
 
   function createLink(fromRow: number, fromCol: number, toRow: number, toCol: number) {
@@ -718,6 +869,8 @@ export const useBoardStore = defineStore('board', () => {
     setSelectedItem,
     setActiveFootprint,
     renameProject,
+    setNetlist,
+    importKiCadNetlist,
     setActiveTool,
     setActiveWireType,
     toggleCut,

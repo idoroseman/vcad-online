@@ -190,6 +190,54 @@ export function getDipPins(component: PlacedComponent) {
   return [...leftPins, ...rightPins]
 }
 
+export function getComponentPinNumber(component: PlacedComponent, index: number) {
+  const footprint = getFootprint(component.footprintId)
+
+  if (footprint.style === 'dip') {
+    const pinCount = getDipPinCount(component) ?? footprint.defaultDipPins ?? 8
+
+    if (index < 0 || index >= pinCount) {
+      return null
+    }
+
+    return String(index + 1)
+  }
+
+  if (footprint.style === 'axial' || footprint.style === 'radial') {
+    if (index < 0 || index > 1) {
+      return null
+    }
+
+    return String(index + 1)
+  }
+
+  return null
+}
+
+export function getPinIndexForPinNumber(component: PlacedComponent, pinNumber: string) {
+  const normalizedPin = pinNumber.trim()
+
+  if (!normalizedPin) {
+    return null
+  }
+
+  const pinTotal = getComponentPinHoles(component).length
+
+  for (let index = 0; index < pinTotal; index += 1) {
+    if (getComponentPinNumber(component, index) === normalizedPin || String(index + 1) === normalizedPin) {
+      return index
+    }
+  }
+
+  const parsedPin = Number.parseInt(normalizedPin, 10)
+
+  if (Number.isNaN(parsedPin)) {
+    return null
+  }
+
+  return parsedPin >= 1 && parsedPin <= pinTotal ? parsedPin - 1 : null
+}
+
 export function getComponentBounds(component: PlacedComponent) {
   const pins = getComponentPinHoles(component)
   const axialBody = getAxialBodyGeometry(component)
