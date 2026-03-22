@@ -6,12 +6,11 @@ import {
   getAxialBodyGeometry,
   getComponentBounds,
   getComponentPinHoles,
-  getPinIndexForPinNumber,
   getFootprint,
   getPinLayout,
   getRadialBodyGeometry,
 } from '../../lib/footprints'
-import { computeRatsnest } from '../../lib/connectivity'
+import { buildBoardConnectivity, buildNetNamesByConnectivityGroup, computeRatsnest } from '../../lib/connectivity'
 import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
 type SelectedItem = { kind: 'cut' | 'component' | 'link' | 'wire'; id: string } | null
@@ -131,139 +130,8 @@ const cursorPosition = ref<{ row: number; col: number } | null>(null)
 const hoveredLinkId = ref<string | null>(null)
 const dragState = ref<DragState | null>(null)
 const suppressClick = ref(false)
-const netNamesByGroup = computed(() => {
-  const byGroup = new Map<string, Set<string>>()
-
-  if (!props.board.netlist) {
-    return byGroup
-  }
-
-  class UnionFind {
-    private parent = new Map<string, string>()
-
-    add(key: string) {
-      if (!this.parent.has(key)) {
-        this.parent.set(key, key)
-      }
-    }
-
-    find(key: string): string {
-      this.add(key)
-      const parent = this.parent.get(key)
-
-      if (!parent || parent === key) {
-        return key
-      }
-
-      const root = this.find(parent)
-      this.parent.set(key, root)
-      return root
-    }
-
-    union(left: string, right: string) {
-      const leftRoot = this.find(left)
-      const rightRoot = this.find(right)
-
-      if (leftRoot !== rightRoot) {
-        this.parent.set(rightRoot, leftRoot)
-      }
-    }
-  }
-
-  const keyFor = (row: number, col: number) => `${row}:${col}`
-  const unionFind = new UnionFind()
-  const cutsByRow = new Map<number, Set<number>>()
-
-  for (const cut of props.board.cuts) {
-    const existing = cutsByRow.get(cut.row)
-
-    if (existing) {
-      existing.add(cut.col)
-    } else {
-      cutsByRow.set(cut.row, new Set([cut.col]))
-    }
-  }
-
-  for (let row = 0; row < props.board.rows; row += 1) {
-    for (let col = 0; col < props.board.cols; col += 1) {
-      unionFind.add(keyFor(row, col))
-    }
-  }
-
-  for (let row = 0; row < props.board.rows; row += 1) {
-    const rowCuts = cutsByRow.get(row) ?? new Set<number>()
-
-    for (let col = 0; col < props.board.cols - 1; col += 1) {
-      if (rowCuts.has(col) || rowCuts.has(col + 1)) {
-        continue
-      }
-
-      unionFind.union(keyFor(row, col), keyFor(row, col + 1))
-    }
-  }
-
-  for (const link of props.board.links) {
-    unionFind.union(keyFor(link.fromRow, link.fromCol), keyFor(link.toRow, link.toCol))
-  }
-
-  const componentsByRef = new Map(props.board.components.map((component) => [component.refDes.trim().toUpperCase(), component]))
-
-  for (const net of props.board.netlist.nets) {
-    const netName = net.name.trim()
-
-    if (!netName) {
-      continue
-    }
-
-    for (const node of net.nodes) {
-      const component = componentsByRef.get(node.refDes.trim().toUpperCase())
-
-      if (!component) {
-        continue
-      }
-
-      const pinIndex = getPinIndexForPinNumber(component, node.pinNum)
-
-      if (pinIndex === null) {
-        continue
-      }
-
-      const hole = getComponentPinHoles(component)[pinIndex]
-
-      if (!hole) {
-        continue
-      }
-
-      const group = unionFind.find(keyFor(hole.row, hole.col))
-      const existing = byGroup.get(group)
-
-      if (existing) {
-        existing.add(netName)
-      } else {
-        byGroup.set(group, new Set([netName]))
-      }
-    }
-  }
-
-  for (const wire of props.board.wires) {
-    const netName = wire.signalName.trim()
-
-    if (!netName) {
-      continue
-    }
-
-    const group = unionFind.find(keyFor(wire.row, wire.col))
-    const existing = byGroup.get(group)
-
-    if (existing) {
-      existing.add(netName)
-    } else {
-      byGroup.set(group, new Set([netName]))
-    }
-  }
-
-  return byGroup
-})
+const connectivity = computed(() => buildBoardConnectivity(props.board))
+const netNamesByGroup = computed(() => buildNetNamesByConnectivityGroup(props.board))
 const hoveredGroupKey = computed(() => {
   const hover = cursorPosition.value
 
@@ -271,68 +139,7 @@ const hoveredGroupKey = computed(() => {
     return null
   }
 
-  const keyFor = (row: number, col: number) => `${row}:${col}`
-  const parent = new Map<string, string>()
-  const find = (key: string): string => {
-    if (!parent.has(key)) {
-      parent.set(key, key)
-      return key
-    }
-
-    const p = parent.get(key)
-
-    if (!p || p === key) {
-      return key
-    }
-
-    const root = find(p)
-    parent.set(key, root)
-    return root
-  }
-  const union = (left: string, right: string) => {
-    const leftRoot = find(left)
-    const rightRoot = find(right)
-
-    if (leftRoot !== rightRoot) {
-      parent.set(rightRoot, leftRoot)
-    }
-  }
-
-  const cutsByRow = new Map<number, Set<number>>()
-
-  for (const cut of props.board.cuts) {
-    const existing = cutsByRow.get(cut.row)
-
-    if (existing) {
-      existing.add(cut.col)
-    } else {
-      cutsByRow.set(cut.row, new Set([cut.col]))
-    }
-  }
-
-  for (let row = 0; row < props.board.rows; row += 1) {
-    for (let col = 0; col < props.board.cols; col += 1) {
-      find(keyFor(row, col))
-    }
-  }
-
-  for (let row = 0; row < props.board.rows; row += 1) {
-    const rowCuts = cutsByRow.get(row) ?? new Set<number>()
-
-    for (let col = 0; col < props.board.cols - 1; col += 1) {
-      if (rowCuts.has(col) || rowCuts.has(col + 1)) {
-        continue
-      }
-
-      union(keyFor(row, col), keyFor(row, col + 1))
-    }
-  }
-
-  for (const link of props.board.links) {
-    union(keyFor(link.fromRow, link.fromCol), keyFor(link.toRow, link.toCol))
-  }
-
-  return find(keyFor(hover.row, hover.col))
+  return connectivity.value.groupFor(hover.row, hover.col)
 })
 const hoveredPinNetName = computed(() => {
   if (!hoveredGroupKey.value) {
@@ -353,72 +160,8 @@ const hoveredLinkNetName = computed(() => {
     return null
   }
 
-  const groupFor = (targetRow: number, targetCol: number) => {
-    const keyFor = (row: number, col: number) => `${row}:${col}`
-    const parent = new Map<string, string>()
-    const find = (key: string): string => {
-      if (!parent.has(key)) {
-        parent.set(key, key)
-        return key
-      }
-
-      const p = parent.get(key)
-
-      if (!p || p === key) {
-        return key
-      }
-
-      const root = find(p)
-      parent.set(key, root)
-      return root
-    }
-    const union = (left: string, right: string) => {
-      const leftRoot = find(left)
-      const rightRoot = find(right)
-
-      if (leftRoot !== rightRoot) {
-        parent.set(rightRoot, leftRoot)
-      }
-    }
-    const cutsByRow = new Map<number, Set<number>>()
-
-    for (const cut of props.board.cuts) {
-      const existing = cutsByRow.get(cut.row)
-
-      if (existing) {
-        existing.add(cut.col)
-      } else {
-        cutsByRow.set(cut.row, new Set([cut.col]))
-      }
-    }
-
-    for (let row = 0; row < props.board.rows; row += 1) {
-      for (let col = 0; col < props.board.cols; col += 1) {
-        find(keyFor(row, col))
-      }
-    }
-
-    for (let row = 0; row < props.board.rows; row += 1) {
-      const rowCuts = cutsByRow.get(row) ?? new Set<number>()
-
-      for (let col = 0; col < props.board.cols - 1; col += 1) {
-        if (rowCuts.has(col) || rowCuts.has(col + 1)) {
-          continue
-        }
-
-        union(keyFor(row, col), keyFor(row, col + 1))
-      }
-    }
-
-    for (const boardLink of props.board.links) {
-      union(keyFor(boardLink.fromRow, boardLink.fromCol), keyFor(boardLink.toRow, boardLink.toCol))
-    }
-
-    return find(keyFor(targetRow, targetCol))
-  }
-
-  const fromGroup = groupFor(link.fromRow, link.fromCol)
-  const toGroup = groupFor(link.toRow, link.toCol)
+  const fromGroup = connectivity.value.groupFor(link.fromRow, link.fromCol)
+  const toGroup = connectivity.value.groupFor(link.toRow, link.toCol)
   const netNames = new Set<string>([
     ...(netNamesByGroup.value.get(fromGroup) ?? new Set<string>()),
     ...(netNamesByGroup.value.get(toGroup) ?? new Set<string>()),

@@ -13,6 +13,10 @@ export interface RatsnestSegment {
   }
 }
 
+export interface BoardConnectivity {
+  groupFor: (row: number, col: number) => string
+}
+
 class UnionFind {
   private parent = new Map<string, string>()
 
@@ -70,7 +74,7 @@ function buildCutsByRow(board: BoardState) {
   return cutsByRow
 }
 
-function buildConnectivity(board: BoardState) {
+export function buildBoardConnectivity(board: BoardState): BoardConnectivity {
   const unionFind = new UnionFind()
   const cutsByRow = buildCutsByRow(board)
 
@@ -101,6 +105,73 @@ function buildConnectivity(board: BoardState) {
       return unionFind.find(holeKey(row, col))
     },
   }
+}
+
+export function buildNetNamesByConnectivityGroup(board: BoardState) {
+  const byGroup = new Map<string, Set<string>>()
+
+  if (!board.netlist) {
+    return byGroup
+  }
+
+  const connectivity = buildBoardConnectivity(board)
+  const componentsByRefDes = new Map(board.components.map((component) => [normalizeName(component.refDes), component]))
+
+  for (const net of board.netlist.nets) {
+    const netName = net.name.trim()
+
+    if (!netName) {
+      continue
+    }
+
+    for (const node of net.nodes) {
+      const component = componentsByRefDes.get(normalizeName(node.refDes))
+
+      if (!component) {
+        continue
+      }
+
+      const pinIndex = getPinIndexForPinNumber(component, node.pinNum)
+
+      if (pinIndex === null) {
+        continue
+      }
+
+      const hole = getComponentPinHoles(component)[pinIndex]
+
+      if (!hole) {
+        continue
+      }
+
+      const group = connectivity.groupFor(hole.row, hole.col)
+      const existing = byGroup.get(group)
+
+      if (existing) {
+        existing.add(netName)
+      } else {
+        byGroup.set(group, new Set([netName]))
+      }
+    }
+  }
+
+  for (const wire of board.wires) {
+    const netName = wire.signalName.trim()
+
+    if (!netName) {
+      continue
+    }
+
+    const group = connectivity.groupFor(wire.row, wire.col)
+    const existing = byGroup.get(group)
+
+    if (existing) {
+      existing.add(netName)
+    } else {
+      byGroup.set(group, new Set([netName]))
+    }
+  }
+
+  return byGroup
 }
 
 function resolveNetEndpoints(board: BoardState, net: NetDef) {
@@ -166,7 +237,7 @@ export function computeRatsnest(board: BoardState): RatsnestSegment[] {
     return []
   }
 
-  const connectivity = buildConnectivity(board)
+  const connectivity = buildBoardConnectivity(board)
   const segments: RatsnestSegment[] = []
 
   for (const net of board.netlist.nets) {
