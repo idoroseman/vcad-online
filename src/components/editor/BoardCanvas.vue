@@ -6,7 +6,7 @@ import {
   getAxialBodyGeometry,
   getComponentBounds,
   getComponentPinHoles,
-  getComponentPinNumber,
+  getPinIndexForPinNumber,
   getFootprint,
   getPinLayout,
   getRadialBodyGeometry,
@@ -128,39 +128,309 @@ const stripSegments = computed(() => {
 const svgElement = ref<SVGSVGElement | null>(null)
 const addMenu = ref<HTMLDetailsElement | null>(null)
 const cursorPosition = ref<{ row: number; col: number } | null>(null)
+const hoveredLinkId = ref<string | null>(null)
 const dragState = ref<DragState | null>(null)
 const suppressClick = ref(false)
-const hoveredPinNetName = computed(() => {
-  const hover = cursorPosition.value
+const netNamesByGroup = computed(() => {
+  const byGroup = new Map<string, Set<string>>()
 
-  if (!hover || !props.board.netlist) {
-    return null
+  if (!props.board.netlist) {
+    return byGroup
   }
 
-  for (const component of props.board.components) {
-    const pins = getComponentPinHoles(component)
+  class UnionFind {
+    private parent = new Map<string, string>()
 
-    for (let index = 0; index < pins.length; index += 1) {
-      const pin = pins[index]
+    add(key: string) {
+      if (!this.parent.has(key)) {
+        this.parent.set(key, key)
+      }
+    }
 
-      if (pin.row !== hover.row || pin.col !== hover.col) {
-        continue
+    find(key: string): string {
+      this.add(key)
+      const parent = this.parent.get(key)
+
+      if (!parent || parent === key) {
+        return key
       }
 
-      const pinNumber = getComponentPinNumber(component, index) ?? String(index + 1)
-      const refDes = component.refDes.trim().toUpperCase()
-      const net = props.board.netlist.nets.find((candidate) =>
-        candidate.nodes.some(
-          (node) => node.refDes.trim().toUpperCase() === refDes && node.pinNum.trim() === pinNumber,
-        ),
-      )
+      const root = this.find(parent)
+      this.parent.set(key, root)
+      return root
+    }
 
-      return net?.name ?? null
+    union(left: string, right: string) {
+      const leftRoot = this.find(left)
+      const rightRoot = this.find(right)
+
+      if (leftRoot !== rightRoot) {
+        this.parent.set(rightRoot, leftRoot)
+      }
     }
   }
 
-  return null
+  const keyFor = (row: number, col: number) => `${row}:${col}`
+  const unionFind = new UnionFind()
+  const cutsByRow = new Map<number, Set<number>>()
+
+  for (const cut of props.board.cuts) {
+    const existing = cutsByRow.get(cut.row)
+
+    if (existing) {
+      existing.add(cut.col)
+    } else {
+      cutsByRow.set(cut.row, new Set([cut.col]))
+    }
+  }
+
+  for (let row = 0; row < props.board.rows; row += 1) {
+    for (let col = 0; col < props.board.cols; col += 1) {
+      unionFind.add(keyFor(row, col))
+    }
+  }
+
+  for (let row = 0; row < props.board.rows; row += 1) {
+    const rowCuts = cutsByRow.get(row) ?? new Set<number>()
+
+    for (let col = 0; col < props.board.cols - 1; col += 1) {
+      if (rowCuts.has(col) || rowCuts.has(col + 1)) {
+        continue
+      }
+
+      unionFind.union(keyFor(row, col), keyFor(row, col + 1))
+    }
+  }
+
+  for (const link of props.board.links) {
+    unionFind.union(keyFor(link.fromRow, link.fromCol), keyFor(link.toRow, link.toCol))
+  }
+
+  const componentsByRef = new Map(props.board.components.map((component) => [component.refDes.trim().toUpperCase(), component]))
+
+  for (const net of props.board.netlist.nets) {
+    const netName = net.name.trim()
+
+    if (!netName) {
+      continue
+    }
+
+    for (const node of net.nodes) {
+      const component = componentsByRef.get(node.refDes.trim().toUpperCase())
+
+      if (!component) {
+        continue
+      }
+
+      const pinIndex = getPinIndexForPinNumber(component, node.pinNum)
+
+      if (pinIndex === null) {
+        continue
+      }
+
+      const hole = getComponentPinHoles(component)[pinIndex]
+
+      if (!hole) {
+        continue
+      }
+
+      const group = unionFind.find(keyFor(hole.row, hole.col))
+      const existing = byGroup.get(group)
+
+      if (existing) {
+        existing.add(netName)
+      } else {
+        byGroup.set(group, new Set([netName]))
+      }
+    }
+  }
+
+  for (const wire of props.board.wires) {
+    const netName = wire.signalName.trim()
+
+    if (!netName) {
+      continue
+    }
+
+    const group = unionFind.find(keyFor(wire.row, wire.col))
+    const existing = byGroup.get(group)
+
+    if (existing) {
+      existing.add(netName)
+    } else {
+      byGroup.set(group, new Set([netName]))
+    }
+  }
+
+  return byGroup
 })
+const hoveredGroupKey = computed(() => {
+  const hover = cursorPosition.value
+
+  if (!hover) {
+    return null
+  }
+
+  const keyFor = (row: number, col: number) => `${row}:${col}`
+  const parent = new Map<string, string>()
+  const find = (key: string): string => {
+    if (!parent.has(key)) {
+      parent.set(key, key)
+      return key
+    }
+
+    const p = parent.get(key)
+
+    if (!p || p === key) {
+      return key
+    }
+
+    const root = find(p)
+    parent.set(key, root)
+    return root
+  }
+  const union = (left: string, right: string) => {
+    const leftRoot = find(left)
+    const rightRoot = find(right)
+
+    if (leftRoot !== rightRoot) {
+      parent.set(rightRoot, leftRoot)
+    }
+  }
+
+  const cutsByRow = new Map<number, Set<number>>()
+
+  for (const cut of props.board.cuts) {
+    const existing = cutsByRow.get(cut.row)
+
+    if (existing) {
+      existing.add(cut.col)
+    } else {
+      cutsByRow.set(cut.row, new Set([cut.col]))
+    }
+  }
+
+  for (let row = 0; row < props.board.rows; row += 1) {
+    for (let col = 0; col < props.board.cols; col += 1) {
+      find(keyFor(row, col))
+    }
+  }
+
+  for (let row = 0; row < props.board.rows; row += 1) {
+    const rowCuts = cutsByRow.get(row) ?? new Set<number>()
+
+    for (let col = 0; col < props.board.cols - 1; col += 1) {
+      if (rowCuts.has(col) || rowCuts.has(col + 1)) {
+        continue
+      }
+
+      union(keyFor(row, col), keyFor(row, col + 1))
+    }
+  }
+
+  for (const link of props.board.links) {
+    union(keyFor(link.fromRow, link.fromCol), keyFor(link.toRow, link.toCol))
+  }
+
+  return find(keyFor(hover.row, hover.col))
+})
+const hoveredPinNetName = computed(() => {
+  if (!hoveredGroupKey.value) {
+    return null
+  }
+
+  const names = netNamesByGroup.value.get(hoveredGroupKey.value)
+  return names ? [...names].join(' / ') : null
+})
+const hoveredLinkNetName = computed(() => {
+  if (!hoveredLinkId.value) {
+    return null
+  }
+
+  const link = props.board.links.find((item) => item.id === hoveredLinkId.value)
+
+  if (!link) {
+    return null
+  }
+
+  const groupFor = (targetRow: number, targetCol: number) => {
+    const keyFor = (row: number, col: number) => `${row}:${col}`
+    const parent = new Map<string, string>()
+    const find = (key: string): string => {
+      if (!parent.has(key)) {
+        parent.set(key, key)
+        return key
+      }
+
+      const p = parent.get(key)
+
+      if (!p || p === key) {
+        return key
+      }
+
+      const root = find(p)
+      parent.set(key, root)
+      return root
+    }
+    const union = (left: string, right: string) => {
+      const leftRoot = find(left)
+      const rightRoot = find(right)
+
+      if (leftRoot !== rightRoot) {
+        parent.set(rightRoot, leftRoot)
+      }
+    }
+    const cutsByRow = new Map<number, Set<number>>()
+
+    for (const cut of props.board.cuts) {
+      const existing = cutsByRow.get(cut.row)
+
+      if (existing) {
+        existing.add(cut.col)
+      } else {
+        cutsByRow.set(cut.row, new Set([cut.col]))
+      }
+    }
+
+    for (let row = 0; row < props.board.rows; row += 1) {
+      for (let col = 0; col < props.board.cols; col += 1) {
+        find(keyFor(row, col))
+      }
+    }
+
+    for (let row = 0; row < props.board.rows; row += 1) {
+      const rowCuts = cutsByRow.get(row) ?? new Set<number>()
+
+      for (let col = 0; col < props.board.cols - 1; col += 1) {
+        if (rowCuts.has(col) || rowCuts.has(col + 1)) {
+          continue
+        }
+
+        union(keyFor(row, col), keyFor(row, col + 1))
+      }
+    }
+
+    for (const boardLink of props.board.links) {
+      union(keyFor(boardLink.fromRow, boardLink.fromCol), keyFor(boardLink.toRow, boardLink.toCol))
+    }
+
+    return find(keyFor(targetRow, targetCol))
+  }
+
+  const fromGroup = groupFor(link.fromRow, link.fromCol)
+  const toGroup = groupFor(link.toRow, link.toCol)
+  const netNames = new Set<string>([
+    ...(netNamesByGroup.value.get(fromGroup) ?? new Set<string>()),
+    ...(netNamesByGroup.value.get(toGroup) ?? new Set<string>()),
+  ])
+
+  if (netNames.size === 0) {
+    return null
+  }
+
+  return [...netNames].join(' / ')
+})
+const hoveredNetName = computed(() => hoveredPinNetName.value ?? hoveredLinkNetName.value)
 
 const addOptions = [
   { label: 'Axial', footprintId: 'resistor-axial-7' },
@@ -368,6 +638,13 @@ function findLinkHandleAtPoint(x: number, y: number) {
 }
 
 function updateCursorPosition(event: PointerEvent) {
+  const point = clientPointToBoardPoint(event.clientX, event.clientY)
+
+  if (point) {
+    const item = findItemAtPoint(point.x, point.y, point.row, point.col)
+    hoveredLinkId.value = item?.kind === 'link' ? item.id : null
+  }
+
   const hole = clientPointToHole(event.clientX, event.clientY)
 
   if (!hole) {
@@ -447,6 +724,7 @@ function updateCursorPosition(event: PointerEvent) {
 
 function clearCursorPosition() {
   cursorPosition.value = null
+  hoveredLinkId.value = null
 }
 
 function clientPointToHole(clientX: number, clientY: number) {
@@ -853,8 +1131,8 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
         </div>
 
         <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 overflow-visible text-right">
-          <span v-if="hoveredPinNetName" class="whitespace-nowrap rounded-full bg-sky-100 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-sky-900">
-            {{ hoveredPinNetName }}
+          <span v-if="hoveredNetName" class="whitespace-nowrap rounded-full bg-sky-100 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-sky-900">
+            {{ hoveredNetName }}
           </span>
           <span v-if="cursorPosition" class="whitespace-nowrap rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}

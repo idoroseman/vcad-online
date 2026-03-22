@@ -327,6 +327,10 @@ function toPinLayout(value: string, fallback: PinLayout) {
     </template>
 
     <template v-else>
+      <section v-if="!selectedItem" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
+        <p class="font-semibold text-stone-900">Nothing selected</p>
+        <p class="mt-1 text-xs text-stone-500">Click a component, link, wire, or cut to edit its properties.</p>
+      </section>
 
       <section v-if="selectedCut" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
         <p class="font-semibold text-stone-900">Cut Properties</p>
