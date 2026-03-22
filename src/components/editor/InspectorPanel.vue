@@ -21,6 +21,9 @@ defineEmits<{
   setWireType: [type: WireType]
   deleteSelected: []
   updateSelectedLinkColor: [color: string]
+  moveSelectedCut: [row: number, col: number]
+  moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
+  moveSelectedWire: [row: number, col: number]
   updateSelectedWireSignalName: [signalName: string]
   updateSelectedWireType: [type: WireType]
   updateSelectedWireNote: [note: string]
@@ -61,6 +64,16 @@ watch(
     }
   },
 )
+
+function toCoordinate(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
 </script>
 
 <template>
@@ -83,13 +96,6 @@ watch(
     </div>
 
     <template v-if="activeTab === 'project'">
-      <section>
-        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Project</p>
-        <h1 class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">{{ board.projectName }}</h1>
-        <p class="mt-2 text-sm leading-6 text-stone-600">
-          Immediate editor-first workflow. Guests keep one working project locally, and signed-in users can open cloud projects from the Projects screen.
-        </p>
-      </section>
 
       <section class="grid grid-cols-2 gap-3 text-sm">
         <div class="rounded-2xl bg-stone-900 px-3 py-4 text-stone-50">
@@ -143,7 +149,7 @@ watch(
         <p class="font-semibold">Next implementation targets</p>
         <ul class="mt-3 space-y-2 text-sky-900/80">
           <li>KiCad schematic import</li>
-          <li>Cut tool and strip segmentation</li>
+          <li>Component placement and footprint mapping</li>
           <li>Ratsnest and print layout</li>
         </ul>
       </section>
@@ -162,11 +168,80 @@ watch(
 
       <section v-if="selectedCut" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
         <p class="font-semibold text-stone-900">Cut Properties</p>
-        <p class="mt-2">Row {{ selectedCut.row }}, Col {{ selectedCut.col }}</p>
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Row</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.rows - 1"
+              :value="selectedCut.row"
+              @change="$emit('moveSelectedCut', toCoordinate(($event.target as HTMLInputElement).value, selectedCut.row), selectedCut.col)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Col</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.cols - 1"
+              :value="selectedCut.col"
+              @change="$emit('moveSelectedCut', selectedCut.row, toCoordinate(($event.target as HTMLInputElement).value, selectedCut.col))"
+            />
+          </label>
+        </div>
       </section>
 
       <section v-if="selectedLink" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
         <p class="font-semibold text-stone-900">Link Properties</p>
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">From Row</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.rows - 1"
+              :value="selectedLink.fromRow"
+              @change="$emit('moveSelectedLink', toCoordinate(($event.target as HTMLInputElement).value, selectedLink.fromRow), selectedLink.fromCol, selectedLink.toRow, selectedLink.toCol)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">From Col</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.cols - 1"
+              :value="selectedLink.fromCol"
+              @change="$emit('moveSelectedLink', selectedLink.fromRow, toCoordinate(($event.target as HTMLInputElement).value, selectedLink.fromCol), selectedLink.toRow, selectedLink.toCol)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">To Row</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.rows - 1"
+              :value="selectedLink.toRow"
+              @change="$emit('moveSelectedLink', selectedLink.fromRow, selectedLink.fromCol, toCoordinate(($event.target as HTMLInputElement).value, selectedLink.toRow), selectedLink.toCol)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">To Col</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.cols - 1"
+              :value="selectedLink.toCol"
+              @change="$emit('moveSelectedLink', selectedLink.fromRow, selectedLink.fromCol, selectedLink.toRow, toCoordinate(($event.target as HTMLInputElement).value, selectedLink.toCol))"
+            />
+          </label>
+        </div>
         <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Color</label>
         <div class="mt-2 flex items-center gap-3">
           <input
@@ -181,6 +256,31 @@ watch(
 
       <section v-if="selectedWire" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
         <p class="font-semibold text-stone-900">Wire Properties</p>
+
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Row</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.rows - 1"
+              :value="selectedWire.row"
+              @change="$emit('moveSelectedWire', toCoordinate(($event.target as HTMLInputElement).value, selectedWire.row), selectedWire.col)"
+            />
+          </label>
+          <label>
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Col</span>
+            <input
+              type="number"
+              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+              :min="0"
+              :max="board.cols - 1"
+              :value="selectedWire.col"
+              @change="$emit('moveSelectedWire', selectedWire.row, toCoordinate(($event.target as HTMLInputElement).value, selectedWire.col))"
+            />
+          </label>
+        </div>
 
         <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Signal Name</label>
         <input

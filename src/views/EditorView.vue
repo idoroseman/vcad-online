@@ -82,6 +82,9 @@ onUnmounted(() => {
         :pending-link-start="pendingLinkStart"
         :selected-item="selectedItem"
         @delete-selected="boardStore.deleteSelected"
+        @move-selected-cut="boardStore.moveSelectedCut"
+        @move-selected-link="boardStore.moveSelectedLink"
+        @move-selected-wire="boardStore.moveSelectedWire"
         @set-wire-type="boardStore.setActiveWireType"
         @update-selected-link-color="boardStore.updateSelectedLinkColor"
         @update-selected-wire-note="boardStore.updateSelectedWireNote"
@@ -96,6 +99,10 @@ onUnmounted(() => {
         :selected-item="selectedItem"
         @inspect-hole="boardStore.inspectAtHole"
         @place-hole="boardStore.placeAtHole"
+        @move-selected-cut="boardStore.moveSelectedCut"
+        @move-selected-link="boardStore.moveSelectedLink"
+        @move-selected-wire="boardStore.moveSelectedWire"
+        @select-item="boardStore.setSelectedItem"
         @set-tool="boardStore.setActiveTool"
       />
     </main>

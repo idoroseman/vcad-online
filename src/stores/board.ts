@@ -11,6 +11,10 @@ type SelectedItem =
   | { kind: 'wire'; id: string }
   | null
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
 function createBoardState(mode: StorageMode = 'local'): BoardState {
   return {
     rows: 25,
@@ -40,8 +44,19 @@ export const useBoardStore = defineStore('board', () => {
     components: board.value.components.length,
   }))
 
+  function normalizeHole(row: number, col: number) {
+    return {
+      row: clamp(Math.round(row), 0, board.value.rows - 1),
+      col: clamp(Math.round(col), 0, board.value.cols - 1),
+    }
+  }
+
   function resetBoard() {
     board.value = createBoardState('local')
+  }
+
+  function setSelectedItem(item: SelectedItem) {
+    selectedItem.value = item
   }
 
   function renameProject(name: string) {
@@ -236,6 +251,91 @@ export const useBoardStore = defineStore('board', () => {
     wire.note = note
   }
 
+  function moveSelectedCut(row: number, col: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'cut') {
+      return
+    }
+
+    const cut = board.value.cuts.find((item) => item.id === selectedItem.value?.id)
+
+    if (!cut) {
+      return
+    }
+
+    const nextHole = normalizeHole(row, col)
+    const occupied = board.value.cuts.some(
+      (item) => item.id !== cut.id && item.row === nextHole.row && item.col === nextHole.col,
+    )
+
+    if (occupied) {
+      return
+    }
+
+    cut.row = nextHole.row
+    cut.col = nextHole.col
+  }
+
+  function moveSelectedWire(row: number, col: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'wire') {
+      return
+    }
+
+    const wire = board.value.wires.find((item) => item.id === selectedItem.value?.id)
+
+    if (!wire) {
+      return
+    }
+
+    const nextHole = normalizeHole(row, col)
+    const occupied = board.value.wires.some(
+      (item) => item.id !== wire.id && item.row === nextHole.row && item.col === nextHole.col,
+    )
+
+    if (occupied) {
+      return
+    }
+
+    wire.row = nextHole.row
+    wire.col = nextHole.col
+  }
+
+  function moveSelectedLink(fromRow: number, fromCol: number, toRow: number, toCol: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'link') {
+      return
+    }
+
+    const link = board.value.links.find((item) => item.id === selectedItem.value?.id)
+
+    if (!link) {
+      return
+    }
+
+    const nextFrom = normalizeHole(fromRow, fromCol)
+    const nextTo = normalizeHole(toRow, toCol)
+
+    if (nextFrom.row === nextTo.row && nextFrom.col === nextTo.col) {
+      return
+    }
+
+    const duplicate = board.value.links.some(
+      (item) =>
+        item.id !== link.id &&
+        item.fromRow === nextFrom.row &&
+        item.fromCol === nextFrom.col &&
+        item.toRow === nextTo.row &&
+        item.toCol === nextTo.col,
+    )
+
+    if (duplicate) {
+      return
+    }
+
+    link.fromRow = nextFrom.row
+    link.fromCol = nextFrom.col
+    link.toRow = nextTo.row
+    link.toCol = nextTo.col
+  }
+
   function cancelPendingPlacement() {
     pendingLinkStart.value = null
     activeTool.value = 'inspect'
@@ -286,6 +386,7 @@ export const useBoardStore = defineStore('board', () => {
     pendingLinkStart,
     selectedItem,
     resetBoard,
+    setSelectedItem,
     renameProject,
     setActiveTool,
     setActiveWireType,
@@ -294,6 +395,9 @@ export const useBoardStore = defineStore('board', () => {
     inspectAtHole,
     deleteSelected,
     updateSelectedLinkColor,
+    moveSelectedCut,
+    moveSelectedWire,
+    moveSelectedLink,
     updateSelectedWireSignalName,
     updateSelectedWireType,
     updateSelectedWireNote,

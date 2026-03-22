@@ -3,18 +3,59 @@ import { computed, ref } from 'vue'
 
 import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
+type SelectedItem = { kind: 'cut' | 'link' | 'wire'; id: string } | null
+
+type DragState =
+  | {
+      kind: 'cut'
+      pointerId: number
+      originHole: { row: number; col: number }
+      lastHole: { row: number; col: number }
+    }
+  | {
+      kind: 'wire'
+      pointerId: number
+      originHole: { row: number; col: number }
+      lastHole: { row: number; col: number }
+    }
+  | {
+      kind: 'link-from'
+      pointerId: number
+      originHole: { row: number; col: number }
+      lastHole: { row: number; col: number }
+      start: { fromRow: number; fromCol: number; toRow: number; toCol: number }
+    }
+  | {
+      kind: 'link-to'
+      pointerId: number
+      originHole: { row: number; col: number }
+      lastHole: { row: number; col: number }
+      start: { fromRow: number; fromCol: number; toRow: number; toCol: number }
+    }
+  | {
+      kind: 'link'
+      pointerId: number
+      originHole: { row: number; col: number }
+      lastHole: { row: number; col: number }
+      start: { fromRow: number; fromCol: number; toRow: number; toCol: number }
+    }
+
 const props = defineProps<{
   board: BoardState
   activeTool: ActiveTool
   activeWireType: WireType
   pendingLinkStart: { row: number; col: number } | null
-  selectedItem: { kind: 'cut' | 'link' | 'wire'; id: string } | null
+  selectedItem: SelectedItem
 }>()
 
 const emit = defineEmits<{
   placeHole: [row: number, col: number]
   setTool: [tool: ActiveTool]
   inspectHole: [row: number, col: number]
+  moveSelectedCut: [row: number, col: number]
+  moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
+  moveSelectedWire: [row: number, col: number]
+  selectItem: [item: SelectedItem]
 }>()
 
 const pitch = 18
@@ -63,6 +104,8 @@ const stripSegments = computed(() => {
 })
 const svgElement = ref<SVGSVGElement | null>(null)
 const cursorPosition = ref<{ row: number; col: number } | null>(null)
+const dragState = ref<DragState | null>(null)
+const suppressClick = ref(false)
 
 function pointX(col: number) {
   return 32 + col * pitch
@@ -101,21 +144,61 @@ function toolClasses(tool: ActiveTool) {
     : 'inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700'
 }
 
-function updateCursorPosition(event: PointerEvent) {
-  const hole = clientPointToHole(event.clientX, event.clientY)
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
 
-  if (!hole) {
-    return
+function distance(ax: number, ay: number, bx: number, by: number) {
+  return Math.hypot(ax - bx, ay - by)
+}
+
+function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const dx = bx - ax
+  const dy = by - ay
+
+  if (dx === 0 && dy === 0) {
+    return distance(px, py, ax, ay)
   }
 
-  cursorPosition.value = hole
+  const projection = clamp(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy), 0, 1)
+  const nearestX = ax + projection * dx
+  const nearestY = ay + projection * dy
+
+  return distance(px, py, nearestX, nearestY)
 }
 
-function clearCursorPosition() {
-  cursorPosition.value = null
+function linkControlPoint(link: { fromRow: number; fromCol: number; toRow: number; toCol: number }) {
+  return {
+    x: (pointX(link.fromCol) + pointX(link.toCol)) / 2,
+    y: Math.min(pointY(link.fromRow), pointY(link.toRow)) - 18,
+  }
 }
 
-function clientPointToHole(clientX: number, clientY: number) {
+function distanceToLinkPath(x: number, y: number, link: { fromRow: number; fromCol: number; toRow: number; toCol: number }) {
+  const startX = pointX(link.fromCol)
+  const startY = pointY(link.fromRow)
+  const endX = pointX(link.toCol)
+  const endY = pointY(link.toRow)
+  const control = linkControlPoint(link)
+  let best = Number.POSITIVE_INFINITY
+  let previousX = startX
+  let previousY = startY
+
+  for (let step = 1; step <= 18; step += 1) {
+    const t = step / 18
+    const inverse = 1 - t
+    const sampleX = inverse * inverse * startX + 2 * inverse * t * control.x + t * t * endX
+    const sampleY = inverse * inverse * startY + 2 * inverse * t * control.y + t * t * endY
+
+    best = Math.min(best, distanceToSegment(x, y, previousX, previousY, sampleX, sampleY))
+    previousX = sampleX
+    previousY = sampleY
+  }
+
+  return best
+}
+
+function clientPointToBoardPoint(clientX: number, clientY: number) {
   if (!svgElement.value) {
     return null
   }
@@ -131,20 +214,285 @@ function clientPointToHole(clientX: number, clientY: number) {
   point.y = clientY
   const svgPoint = point.matrixTransform(matrix.inverse())
 
-  const row = Math.max(0, Math.min(props.board.rows - 1, Math.round((svgPoint.y - 32) / pitch)))
-  const col = Math.max(0, Math.min(props.board.cols - 1, Math.round((svgPoint.x - 32) / pitch)))
-
-  return { row, col }
+  return {
+    x: svgPoint.x,
+    y: svgPoint.y,
+    row: Math.max(0, Math.min(props.board.rows - 1, Math.round((svgPoint.y - 32) / pitch))),
+    col: Math.max(0, Math.min(props.board.cols - 1, Math.round((svgPoint.x - 32) / pitch))),
+  }
 }
 
-function handleBoardClick(event: MouseEvent) {
+function findItemAtPoint(x: number, y: number, row: number, col: number): SelectedItem {
+  const cut = props.board.cuts.find((item) => distance(x, y, pointX(item.col), pointY(item.row)) <= 10)
+
+  if (cut) {
+    return { kind: 'cut', id: cut.id }
+  }
+
+  const wire = props.board.wires.find((item) => {
+    const holeX = pointX(item.col)
+    const holeY = pointY(item.row)
+
+    return (
+      distance(x, y, holeX, holeY - 28) <= 9 ||
+      distance(x, y, holeX, holeY) <= 8 ||
+      (Math.abs(x - holeX) <= 6 && y <= holeY && y >= holeY - 28)
+    )
+  })
+
+  if (wire) {
+    return { kind: 'wire', id: wire.id }
+  }
+
+  const link = props.board.links.find((item) => {
+    const startHit = distance(x, y, pointX(item.fromCol), pointY(item.fromRow)) <= 8
+    const endHit = distance(x, y, pointX(item.toCol), pointY(item.toRow)) <= 8
+
+    return startHit || endHit || distanceToLinkPath(x, y, item) <= 8
+  })
+
+  if (link) {
+    return { kind: 'link', id: link.id }
+  }
+
+  const holeHit = props.board.cuts.find((item) => item.row === row && item.col === col)
+  if (holeHit) {
+    return { kind: 'cut', id: holeHit.id }
+  }
+
+  return null
+}
+
+function findLinkHandleAtPoint(x: number, y: number) {
+  for (const link of props.board.links) {
+    if (distance(x, y, pointX(link.fromCol), pointY(link.fromRow)) <= 8) {
+      return { id: link.id, end: 'from' as const }
+    }
+
+    if (distance(x, y, pointX(link.toCol), pointY(link.toRow)) <= 8) {
+      return { id: link.id, end: 'to' as const }
+    }
+  }
+
+  return null
+}
+
+function updateCursorPosition(event: PointerEvent) {
   const hole = clientPointToHole(event.clientX, event.clientY)
 
   if (!hole) {
     return
   }
 
+  cursorPosition.value = hole
+
+  if (props.activeTool !== 'inspect' || !dragState.value || dragState.value.pointerId !== event.pointerId) {
+    return
+  }
+
+  if (hole.row === dragState.value.lastHole.row && hole.col === dragState.value.lastHole.col) {
+    return
+  }
+
+  dragState.value.lastHole = hole
+
+  if (dragState.value.kind === 'cut') {
+    emit('moveSelectedCut', hole.row, hole.col)
+    suppressClick.value = true
+    return
+  }
+
+  if (dragState.value.kind === 'wire') {
+    emit('moveSelectedWire', hole.row, hole.col)
+    suppressClick.value = true
+    return
+  }
+
+  if (dragState.value.kind === 'link-from') {
+    emit(
+      'moveSelectedLink',
+      hole.row,
+      hole.col,
+      dragState.value.start.toRow,
+      dragState.value.start.toCol,
+    )
+    suppressClick.value = true
+    return
+  }
+
+  if (dragState.value.kind === 'link-to') {
+    emit(
+      'moveSelectedLink',
+      dragState.value.start.fromRow,
+      dragState.value.start.fromCol,
+      hole.row,
+      hole.col,
+    )
+    suppressClick.value = true
+    return
+  }
+
+  const minDeltaRow = -Math.min(dragState.value.start.fromRow, dragState.value.start.toRow)
+  const maxDeltaRow = props.board.rows - 1 - Math.max(dragState.value.start.fromRow, dragState.value.start.toRow)
+  const minDeltaCol = -Math.min(dragState.value.start.fromCol, dragState.value.start.toCol)
+  const maxDeltaCol = props.board.cols - 1 - Math.max(dragState.value.start.fromCol, dragState.value.start.toCol)
+  const deltaRow = clamp(hole.row - dragState.value.originHole.row, minDeltaRow, maxDeltaRow)
+  const deltaCol = clamp(hole.col - dragState.value.originHole.col, minDeltaCol, maxDeltaCol)
+
+  emit(
+    'moveSelectedLink',
+    dragState.value.start.fromRow + deltaRow,
+    dragState.value.start.fromCol + deltaCol,
+    dragState.value.start.toRow + deltaRow,
+    dragState.value.start.toCol + deltaCol,
+  )
+  suppressClick.value = true
+}
+
+function clearCursorPosition() {
+  cursorPosition.value = null
+}
+
+function clientPointToHole(clientX: number, clientY: number) {
+  const point = clientPointToBoardPoint(clientX, clientY)
+
+  if (!point) {
+    return null
+  }
+
+  return { row: point.row, col: point.col }
+}
+
+function handlePointerDown(event: PointerEvent) {
+  if (props.activeTool !== 'inspect' || event.button !== 0) {
+    return
+  }
+
+  const point = clientPointToBoardPoint(event.clientX, event.clientY)
+
+  if (!point) {
+    return
+  }
+
+  const item = findItemAtPoint(point.x, point.y, point.row, point.col)
+  const linkHandle = findLinkHandleAtPoint(point.x, point.y)
+
+  if (!item) {
+    return
+  }
+
+  emit('selectItem', item)
+
+  if (item.kind === 'cut') {
+    dragState.value = {
+      kind: 'cut',
+      pointerId: event.pointerId,
+      originHole: { row: point.row, col: point.col },
+      lastHole: { row: point.row, col: point.col },
+    }
+  }
+
+  if (item.kind === 'wire') {
+    dragState.value = {
+      kind: 'wire',
+      pointerId: event.pointerId,
+      originHole: { row: point.row, col: point.col },
+      lastHole: { row: point.row, col: point.col },
+    }
+  }
+
+  if (item.kind === 'link') {
+    const link = props.board.links.find((entry) => entry.id === item.id)
+
+    if (!link) {
+      return
+    }
+
+    const baseState = {
+      pointerId: event.pointerId,
+      originHole: { row: point.row, col: point.col },
+      lastHole: { row: point.row, col: point.col },
+      start: {
+        fromRow: link.fromRow,
+        fromCol: link.fromCol,
+        toRow: link.toRow,
+        toCol: link.toCol,
+      },
+    }
+
+    if (linkHandle?.id === link.id && linkHandle.end === 'from') {
+      dragState.value = {
+        kind: 'link-from',
+        ...baseState,
+      }
+      svgElement.value?.setPointerCapture(event.pointerId)
+      return
+    }
+
+    if (linkHandle?.id === link.id && linkHandle.end === 'to') {
+      dragState.value = {
+        kind: 'link-to',
+        ...baseState,
+      }
+      svgElement.value?.setPointerCapture(event.pointerId)
+      return
+    }
+
+    dragState.value = {
+      kind: 'link',
+      ...baseState,
+    }
+  }
+
+  svgElement.value?.setPointerCapture(event.pointerId)
+}
+
+function clearDragState(pointerId?: number) {
+  if (!dragState.value) {
+    return
+  }
+
+  if (pointerId !== undefined && dragState.value.pointerId !== pointerId) {
+    return
+  }
+
+  if (svgElement.value?.hasPointerCapture(dragState.value.pointerId)) {
+    svgElement.value.releasePointerCapture(dragState.value.pointerId)
+  }
+
+  dragState.value = null
+}
+
+function handlePointerUp(event: PointerEvent) {
+  clearDragState(event.pointerId)
+}
+
+function handlePointerCancel(event: PointerEvent) {
+  clearDragState(event.pointerId)
+}
+
+function handleBoardClick(event: MouseEvent) {
+  if (suppressClick.value) {
+    suppressClick.value = false
+    return
+  }
+
+  const hole = clientPointToHole(event.clientX, event.clientY)
+
+  const point = clientPointToBoardPoint(event.clientX, event.clientY)
+
+  if (!hole || !point) {
+    return
+  }
+
   if (props.activeTool === 'inspect') {
+    const item = findItemAtPoint(point.x, point.y, hole.row, hole.col)
+
+    if (item) {
+      emit('selectItem', item)
+      return
+    }
+
     emit('inspectHole', hole.row, hole.col)
     return
   }
@@ -213,10 +561,13 @@ function isSelected(kind: 'cut' | 'link' | 'wire', id: string) {
             :height="boardHeight"
             preserveAspectRatio="xMinYMin meet"
             class="block"
-            :class="activeTool === 'inspect' ? 'cursor-crosshair' : 'cursor-cell'"
+            :class="activeTool === 'inspect' ? (dragState ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-cell'"
             @click="handleBoardClick"
+            @pointercancel="handlePointerCancel"
+            @pointerdown="handlePointerDown"
             @pointerleave="clearCursorPosition"
             @pointermove="updateCursorPosition"
+            @pointerup="handlePointerUp"
           >
           <rect x="0" y="0" :width="boardWidth" :height="boardHeight" fill="#efe0a8" />
 
@@ -321,15 +672,47 @@ function isSelected(kind: 'cut' | 'link' | 'wire', id: string) {
           </g>
 
           <g>
-            <path
-              v-for="link in board.links"
-              :key="link.id"
-              :d="`M ${pointX(link.fromCol)} ${pointY(link.fromRow)} Q ${(pointX(link.fromCol) + pointX(link.toCol)) / 2} ${Math.min(pointY(link.fromRow), pointY(link.toRow)) - 18} ${pointX(link.toCol)} ${pointY(link.toRow)}`"
-              :stroke="isSelected('link', link.id) ? '#0f172a' : link.color ?? '#0f766e'"
-              :stroke-width="isSelected('link', link.id) ? 5 : 3"
-              fill="none"
-              stroke-linecap="round"
-            />
+            <g v-for="link in board.links" :key="link.id">
+              <path
+                :d="`M ${pointX(link.fromCol)} ${pointY(link.fromRow)} Q ${(pointX(link.fromCol) + pointX(link.toCol)) / 2} ${Math.min(pointY(link.fromRow), pointY(link.toRow)) - 18} ${pointX(link.toCol)} ${pointY(link.toRow)}`"
+                :stroke="isSelected('link', link.id) ? '#0f172a' : link.color ?? '#0f766e'"
+                :stroke-width="isSelected('link', link.id) ? 5 : 3"
+                fill="none"
+                stroke-linecap="round"
+              />
+              <g v-if="isSelected('link', link.id)">
+                <circle
+                  :cx="pointX(link.fromCol)"
+                  :cy="pointY(link.fromRow)"
+                  r="7.5"
+                  fill="#fff7ed"
+                  stroke="#0f172a"
+                  stroke-width="1.5"
+                  opacity="0.96"
+                />
+                <circle
+                  :cx="pointX(link.fromCol)"
+                  :cy="pointY(link.fromRow)"
+                  r="3"
+                  :fill="dragState?.kind === 'link-from' ? '#ea580c' : '#0f172a'"
+                />
+                <circle
+                  :cx="pointX(link.toCol)"
+                  :cy="pointY(link.toRow)"
+                  r="7.5"
+                  fill="#fff7ed"
+                  stroke="#0f172a"
+                  stroke-width="1.5"
+                  opacity="0.96"
+                />
+                <circle
+                  :cx="pointX(link.toCol)"
+                  :cy="pointY(link.toRow)"
+                  r="3"
+                  :fill="dragState?.kind === 'link-to' ? '#ea580c' : '#0f172a'"
+                />
+              </g>
+            </g>
           </g>
 
           <g>
