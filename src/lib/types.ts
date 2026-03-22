@@ -1,6 +1,7 @@
 export type StorageMode = 'local' | 'cloud'
 export type WireType = 'power' | 'gnd' | 'input' | 'output' | 'bidirectional'
 export type ActiveTool = 'inspect' | 'link' | 'wire' | 'cut' | 'component'
+export type PinLayout = 'single-row' | 'dual-row'
 
 export interface Cut {
   id: string
@@ -38,6 +39,7 @@ export interface PlacedComponent {
   bodyRadius?: number
   dipPins?: number
   dipWidth?: number
+  pinLayout?: PinLayout
 }
 
 export interface NetNode {

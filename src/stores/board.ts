@@ -11,10 +11,22 @@ import {
   getDipWidth,
   getFootprint,
   getLeadPitch,
+  getPinLayout,
 } from '../lib/footprints'
 import { parseKiCadNetlist } from '../lib/kicad-netlist'
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
-import type { ActiveTool, BoardState, Cut, Link, Netlist, PlacedComponent, StorageMode, Wire, WireType } from '../lib/types'
+import type {
+  ActiveTool,
+  BoardState,
+  Cut,
+  Link,
+  Netlist,
+  PinLayout,
+  PlacedComponent,
+  StorageMode,
+  Wire,
+  WireType,
+} from '../lib/types'
 
 type SelectedItem =
   | { kind: 'cut'; id: string }
@@ -52,6 +64,7 @@ function createBoardState(mode: StorageMode = 'local'): BoardState {
 export const useBoardStore = defineStore('board', () => {
   const board = ref<BoardState>(loadGuestSession() ?? createBoardState())
   const online = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const showRatsnest = ref(true)
   const activeTool = ref<ActiveTool>('inspect')
   const activeFootprintId = ref(footprintCatalog[0].id)
   const activeWireType = ref<WireType>('input')
@@ -174,6 +187,7 @@ export const useBoardStore = defineStore('board', () => {
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.style === 'dip' ? parsedDipPins ?? footprint.defaultDipPins : footprint.defaultDipPins,
       dipWidth: footprint.defaultDipWidth,
+      pinLayout: footprint.style === 'dip' ? 'dual-row' : undefined,
     }
 
     const placement = findPlacementSpot(component)
@@ -347,6 +361,7 @@ export const useBoardStore = defineStore('board', () => {
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.defaultDipPins,
       dipWidth: footprint.defaultDipWidth,
+      pinLayout: footprint.style === 'dip' ? 'dual-row' : undefined,
     }
 
     if (!isComponentWithinBoard(component)) {
@@ -727,6 +742,91 @@ export const useBoardStore = defineStore('board', () => {
     component.leadPitch = getLeadPitch(nextComponent) ?? footprint.defaultLeadPitch
   }
 
+  function updateSelectedComponentTwoLeadStyle(style: 'axial' | 'radial' | 'single-row') {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+    const isSingleRowTwoLead =
+      footprint.style === 'dip' && getPinLayout(component) === 'single-row' && (getDipPinCount(component) ?? 0) <= 2
+
+    if (!isSingleRowTwoLead && footprint.style === 'dip') {
+      return
+    }
+
+    if (style === 'single-row') {
+      if (isSingleRowTwoLead) {
+        return
+      }
+
+      const singleRowFootprint = footprintCatalog.find((item) => item.style === 'dip')
+
+      if (!singleRowFootprint) {
+        return
+      }
+
+      const nextComponent: PlacedComponent = {
+        ...component,
+        footprintId: singleRowFootprint.id,
+        dipPins: 2,
+        dipWidth: singleRowFootprint.defaultDipWidth,
+        pinLayout: 'single-row',
+        leadPitch: undefined,
+        bodyRadius: undefined,
+      }
+
+      if (!isComponentWithinBoard(nextComponent)) {
+        return
+      }
+
+      component.footprintId = singleRowFootprint.id
+      component.dipPins = 2
+      component.dipWidth = singleRowFootprint.defaultDipWidth
+      component.pinLayout = 'single-row'
+      component.leadPitch = undefined
+      component.bodyRadius = undefined
+      return
+    }
+
+    if (!isSingleRowTwoLead && footprint.style === style) {
+      return
+    }
+
+    const targetFootprint = footprintCatalog.find((item) => item.style === style)
+
+    if (!targetFootprint) {
+      return
+    }
+
+    const nextComponent: PlacedComponent = {
+      ...component,
+      footprintId: targetFootprint.id,
+      leadPitch: targetFootprint.defaultLeadPitch,
+      bodyRadius: targetFootprint.defaultBodyRadius,
+      dipPins: undefined,
+      dipWidth: undefined,
+      pinLayout: undefined,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.footprintId = targetFootprint.id
+    component.leadPitch = targetFootprint.defaultLeadPitch
+    component.bodyRadius = targetFootprint.defaultBodyRadius
+    component.dipPins = undefined
+    component.dipWidth = undefined
+    component.pinLayout = undefined
+  }
+
   function updateSelectedComponentBodyRadius(bodyRadius: number) {
     if (!selectedItem.value || selectedItem.value.kind !== 'component') {
       return
@@ -785,6 +885,45 @@ export const useBoardStore = defineStore('board', () => {
     component.dipPins = getDipPinCount(nextComponent) ?? footprint.defaultDipPins
   }
 
+  function updateSelectedComponentPinLayout(pinLayout: PinLayout) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style !== 'dip') {
+      return
+    }
+
+    const normalizedLayout: PinLayout = pinLayout === 'single-row' ? 'single-row' : 'dual-row'
+
+    if (getPinLayout(component) === normalizedLayout) {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      pinLayout: normalizedLayout,
+      dipPins: component.dipPins ?? footprint.defaultDipPins,
+    }
+
+    nextComponent.dipPins = getDipPinCount(nextComponent) ?? footprint.defaultDipPins
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.pinLayout = normalizedLayout
+    component.dipPins = nextComponent.dipPins
+  }
+
   function updateSelectedComponentDipWidth(dipWidth: number) {
     if (!selectedItem.value || selectedItem.value.kind !== 'component') {
       return
@@ -835,6 +974,14 @@ export const useBoardStore = defineStore('board', () => {
     board.value = createBoardState('local')
   }
 
+  function toggleRatsnest() {
+    showRatsnest.value = !showRatsnest.value
+  }
+
+  function setShowRatsnest(visible: boolean) {
+    showRatsnest.value = visible
+  }
+
   if (typeof window !== 'undefined') {
     window.addEventListener('online', () => {
       online.value = true
@@ -859,6 +1006,7 @@ export const useBoardStore = defineStore('board', () => {
     board,
     counts,
     online,
+    showRatsnest,
     activeTool,
     activeFootprintId,
     activeWireType,
@@ -886,6 +1034,8 @@ export const useBoardStore = defineStore('board', () => {
     updateSelectedComponentBodyRadius,
     updateSelectedComponentDipPins,
     updateSelectedComponentDipWidth,
+    updateSelectedComponentPinLayout,
+    updateSelectedComponentTwoLeadStyle,
     updateSelectedComponentLeadPitch,
     updateSelectedComponentValue,
     updateSelectedComponentRotation,
@@ -894,6 +1044,8 @@ export const useBoardStore = defineStore('board', () => {
     updateSelectedWireNote,
     cancelPendingPlacement,
     setStorageMode,
+    toggleRatsnest,
+    setShowRatsnest,
     loadCloudProject,
     clearGuestCopy,
   }

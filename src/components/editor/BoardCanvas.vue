@@ -6,7 +6,9 @@ import {
   getAxialBodyGeometry,
   getComponentBounds,
   getComponentPinHoles,
+  getComponentPinNumber,
   getFootprint,
+  getPinLayout,
   getRadialBodyGeometry,
 } from '../../lib/footprints'
 import { computeRatsnest } from '../../lib/connectivity'
@@ -61,6 +63,7 @@ const props = defineProps<{
   activeFootprintId: string
   activeWireType: WireType
   pendingLinkStart: { row: number; col: number } | null
+  showRatsnest: boolean
   selectedItem: SelectedItem
 }>()
 
@@ -73,6 +76,7 @@ const emit = defineEmits<{
   moveSelectedCut: [row: number, col: number]
   moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
   moveSelectedWire: [row: number, col: number]
+  toggleRatsnest: []
   selectItem: [item: SelectedItem]
 }>()
 
@@ -126,6 +130,37 @@ const addMenu = ref<HTMLDetailsElement | null>(null)
 const cursorPosition = ref<{ row: number; col: number } | null>(null)
 const dragState = ref<DragState | null>(null)
 const suppressClick = ref(false)
+const hoveredPinNetName = computed(() => {
+  const hover = cursorPosition.value
+
+  if (!hover || !props.board.netlist) {
+    return null
+  }
+
+  for (const component of props.board.components) {
+    const pins = getComponentPinHoles(component)
+
+    for (let index = 0; index < pins.length; index += 1) {
+      const pin = pins[index]
+
+      if (pin.row !== hover.row || pin.col !== hover.col) {
+        continue
+      }
+
+      const pinNumber = getComponentPinNumber(component, index) ?? String(index + 1)
+      const refDes = component.refDes.trim().toUpperCase()
+      const net = props.board.netlist.nets.find((candidate) =>
+        candidate.nodes.some(
+          (node) => node.refDes.trim().toUpperCase() === refDes && node.pinNum.trim() === pinNumber,
+        ),
+      )
+
+      return net?.name ?? null
+    }
+  }
+
+  return null
+})
 
 const addOptions = [
   { label: 'Axial', footprintId: 'resistor-axial-7' },
@@ -612,6 +647,38 @@ function dipBodyRect(component: BoardState['components'][number]) {
     return null
   }
 
+  if (getPinLayout(component) === 'single-row') {
+    const pins = getComponentPinHoles(component)
+
+    if (!pins.length) {
+      return null
+    }
+
+    const pinXs = pins.map((pin) => pointX(pin.col))
+    const pinYs = pins.map((pin) => pointY(pin.row))
+    const minX = Math.min(...pinXs)
+    const maxX = Math.max(...pinXs)
+    const minY = Math.min(...pinYs)
+    const maxY = Math.max(...pinYs)
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
+    const spanX = maxX - minX
+    const spanY = maxY - minY
+    const axisPadding = pitch * 0.55
+    const narrowSize = pitch * 1.05
+    const width = spanY >= spanX ? narrowSize : Math.max(spanX + axisPadding * 2, pitch * 1.6)
+    const height = spanY >= spanX ? Math.max(spanY + axisPadding * 2, pitch * 1.6) : narrowSize
+    const bodyX = centerX - width / 2
+    const bodyY = centerY - height / 2
+
+    return {
+      x: bodyX,
+      y: bodyY,
+      width,
+      height,
+    }
+  }
+
   const bounds = getComponentBounds(component)
   const minX = pointX(bounds.minCol)
   const maxX = pointX(bounds.maxCol)
@@ -619,8 +686,9 @@ function dipBodyRect(component: BoardState['components'][number]) {
   const maxY = pointY(bounds.maxRow)
   const spanX = maxX - minX
   const spanY = maxY - minY
+  const isVerticalBody = component.rotation % 2 === 0
 
-  if (spanY >= spanX) {
+  if (isVerticalBody) {
     return {
       x: minX + pitch * 0.52,
       y: minY - pitch * 0.5,
@@ -648,6 +716,13 @@ function dipPinAnchor(component: BoardState['components'][number], pin: { row: n
   const py = pointY(pin.row)
   const cx = rect.x + rect.width / 2
   const cy = rect.y + rect.height / 2
+
+  if (getPinLayout(component) === 'single-row') {
+    return {
+      x: px,
+      y: py,
+    }
+  }
 
   if (component.rotation % 2 === 0) {
     return {
@@ -699,6 +774,11 @@ function dipPinOneMarker(component: BoardState['components'][number]) {
     y: anchor.y - inset,
   }
 }
+
+function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
+  return getFootprint(component.footprintId).style === 'dip' && getPinLayout(component) === 'single-row'
+}
+
 </script>
 
 <template>
@@ -763,9 +843,19 @@ function dipPinOneMarker(component: BoardState['components'][number]) {
               </button>
             </div>
           </details>
+          <button
+            class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-semibold tracking-[0.16em]"
+            :class="props.showRatsnest ? 'border-sky-400 bg-sky-100 text-sky-900' : 'border-stone-300 bg-white text-stone-600'"
+            @click="emit('toggleRatsnest')"
+          >
+            {{ props.showRatsnest ? 'Ratsnest On' : 'Ratsnest Off' }}
+          </button>
         </div>
 
         <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 overflow-visible text-right">
+          <span v-if="hoveredPinNetName" class="whitespace-nowrap rounded-full bg-sky-100 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-sky-900">
+            {{ hoveredPinNetName }}
+          </span>
           <span v-if="cursorPosition" class="whitespace-nowrap rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}
           </span>
@@ -854,6 +944,7 @@ function dipPinOneMarker(component: BoardState['components'][number]) {
             <g v-for="component in board.components" :key="component.id">
               <g v-for="(pin, index) in getComponentPinHoles(component)" :key="`${component.id}-pin-${index}`">
                 <circle
+                  v-if="!shouldDrawPinsAfterBody(component)"
                   :cx="pointX(pin.col)"
                   :cy="pointY(pin.row)"
                   :r="isSelected('component', component.id) ? 5.2 : 4.2"
@@ -973,6 +1064,17 @@ function dipPinOneMarker(component: BoardState['components'][number]) {
                     stroke="#7c2d12"
                     stroke-width="1"
                   />
+                  <circle
+                    v-for="(pin, index) in getComponentPinHoles(component)"
+                    v-if="shouldDrawPinsAfterBody(component)"
+                    :key="`${component.id}-single-row-pin-${index}`"
+                    :cx="pointX(pin.col)"
+                    :cy="pointY(pin.row)"
+                    :r="isSelected('component', component.id) ? 5.2 : 4.2"
+                    :fill="index === 0 ? '#f97316' : '#fff7ed'"
+                    :stroke="index === 0 ? '#7c2d12' : isSelected('component', component.id) ? '#0f172a' : '#57534e'"
+                    stroke-width="1.4"
+                  />
                 </template>
                 <rect
                   v-else
@@ -1010,7 +1112,7 @@ function dipPinOneMarker(component: BoardState['components'][number]) {
             </g>
           </g>
 
-          <g v-if="ratsnestSegments.length" opacity="0.82">
+          <g v-if="props.showRatsnest && ratsnestSegments.length" opacity="0.82">
             <g v-for="(segment, index) in ratsnestSegments" :key="`${segment.netName}-${segment.from.row}-${segment.from.col}-${segment.to.row}-${segment.to.col}-${index}`">
               <line
                 :x1="pointX(segment.from.col)"

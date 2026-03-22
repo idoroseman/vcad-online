@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { footprintCatalog, getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch } from '../../lib/footprints'
-import type { ActiveTool, BoardState, PlacedComponent, WireType } from '../../lib/types'
+import { footprintCatalog, getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch, getPinLayout } from '../../lib/footprints'
+import type { ActiveTool, BoardState, PinLayout, PlacedComponent, WireType } from '../../lib/types'
 
 const props = defineProps<{
   board: BoardState
@@ -32,6 +32,8 @@ defineEmits<{
   updateSelectedComponentBodyRadius: [bodyRadius: number]
   updateSelectedComponentDipPins: [dipPins: number]
   updateSelectedComponentDipWidth: [dipWidth: number]
+  updateSelectedComponentPinLayout: [pinLayout: PinLayout]
+  updateSelectedComponentTwoLeadStyle: [style: 'axial' | 'radial' | 'single-row']
   updateSelectedComponentLeadPitch: [leadPitch: number]
   updateSelectedComponentRefDes: [refDes: string]
   updateSelectedComponentRotation: [rotation: PlacedComponent['rotation']]
@@ -148,6 +150,34 @@ function toDipWidth(value: string, fallback: number) {
   return parsed
 }
 
+function toTwoLeadStyle(value: string, fallback: 'axial' | 'radial' | 'single-row') {
+  if (value === 'axial' || value === 'radial' || value === 'single-row') {
+    return value
+  }
+
+  return fallback
+}
+
+function supportsTwoLeadStyle(component: PlacedComponent) {
+  const footprint = getFootprint(component.footprintId)
+
+  if (footprint.style !== 'dip') {
+    return true
+  }
+
+  return getPinLayout(component) === 'single-row' && (getDipPinCount(component) ?? 0) <= 2
+}
+
+function getTwoLeadStyle(component: PlacedComponent) {
+  const footprint = getFootprint(component.footprintId)
+
+  if (footprint.style === 'dip') {
+    return 'single-row' as const
+  }
+
+  return footprint.style
+}
+
 function toBodyDiameter(value: string, fallback: number) {
   const parsed = Number.parseFloat(value)
 
@@ -156,6 +186,14 @@ function toBodyDiameter(value: string, fallback: number) {
   }
 
   return parsed
+}
+
+function toPinLayout(value: string, fallback: PinLayout) {
+  if (value === 'single-row' || value === 'dual-row') {
+    return value
+  }
+
+  return fallback
 }
 </script>
 
@@ -289,15 +327,6 @@ function toBodyDiameter(value: string, fallback: number) {
     </template>
 
     <template v-else>
-      <section>
-        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Selection</p>
-        <div class="mt-3 rounded-2xl bg-stone-100 px-3 py-3 text-sm text-stone-700">
-          <p v-if="selectedItem" class="font-medium">
-            Selected: <span class="capitalize">{{ selectedItem.kind }}</span>
-          </p>
-          <p v-else>No item selected</p>
-        </div>
-      </section>
 
       <section v-if="selectedCut" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
         <p class="font-semibold text-stone-900">Cut Properties</p>
@@ -328,12 +357,6 @@ function toBodyDiameter(value: string, fallback: number) {
       </section>
 
       <section v-if="selectedComponent" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
-        <p class="font-semibold text-stone-900">Component Properties</p>
-
-        <div class="mt-3 rounded-2xl bg-white px-3 py-3">
-          <div class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Footprint</div>
-          <div class="mt-1 font-medium text-stone-900">{{ getFootprint(selectedComponent.footprintId).label }}</div>
-        </div>
 
         <div class="mt-3 grid grid-cols-2 gap-3">
           <label>
@@ -388,6 +411,23 @@ function toBodyDiameter(value: string, fallback: number) {
         </select>
 
         <label
+          v-if="supportsTwoLeadStyle(selectedComponent)"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
+          Lead Style
+        </label>
+        <select
+          v-if="supportsTwoLeadStyle(selectedComponent)"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :value="getTwoLeadStyle(selectedComponent)"
+          @change="$emit('updateSelectedComponentTwoLeadStyle', toTwoLeadStyle(($event.target as HTMLSelectElement).value, getTwoLeadStyle(selectedComponent)))"
+        >
+          <option value="axial">Axial</option>
+          <option value="radial">Radial</option>
+          <option value="single-row">Single Row</option>
+        </select>
+
+        <label
           v-if="getFootprint(selectedComponent.footprintId).style !== 'dip'"
           class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
         >
@@ -407,27 +447,43 @@ function toBodyDiameter(value: string, fallback: number) {
           v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
           class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
         >
+          Pin Layout
+        </label>
+        <select
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :value="getPinLayout(selectedComponent)"
+          @change="$emit('updateSelectedComponentPinLayout', toPinLayout(($event.target as HTMLSelectElement).value, getPinLayout(selectedComponent)))"
+        >
+          <option value="single-row">Single Row</option>
+          <option value="dual-row">Dual Row (IC)</option>
+        </select>
+
+        <label
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
           Pins
         </label>
         <input
           v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
           type="number"
-          step="2"
+          :step="getPinLayout(selectedComponent) === 'single-row' ? 1 : 2"
           class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
-          :min="getFootprint(selectedComponent.footprintId).minDipPins ?? 4"
+          :min="getPinLayout(selectedComponent) === 'single-row' ? 1 : (getFootprint(selectedComponent.footprintId).minDipPins ?? 4)"
           :max="getFootprint(selectedComponent.footprintId).maxDipPins ?? 40"
           :value="getDipPinCount(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipPins ?? 8"
           @input="$emit('updateSelectedComponentDipPins', toDipPins(($event.target as HTMLInputElement).value, getDipPinCount(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipPins ?? 8))"
         />
 
         <label
-          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip' && getPinLayout(selectedComponent) === 'dual-row'"
           class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
         >
           Chip Width
         </label>
         <input
-          v-if="getFootprint(selectedComponent.footprintId).style === 'dip'"
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip' && getPinLayout(selectedComponent) === 'dual-row'"
           type="number"
           class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
           :min="getFootprint(selectedComponent.footprintId).minDipWidth ?? 2"

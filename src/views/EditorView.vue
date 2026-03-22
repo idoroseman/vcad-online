@@ -12,7 +12,7 @@ import { useBoardStore } from '../stores/board'
 const boardStore = useBoardStore()
 const route = useRoute()
 
-const { board, counts, online, activeTool, activeFootprintId, activeWireType, pendingLinkStart, selectedItem } =
+const { board, counts, online, showRatsnest, activeTool, activeFootprintId, activeWireType, pendingLinkStart, selectedItem } =
   storeToRefs(boardStore)
 
 if (typeof route.params.id === 'string' && route.params.id.length > 0) {
@@ -105,6 +105,8 @@ onUnmounted(() => {
         @update-selected-component-body-radius="boardStore.updateSelectedComponentBodyRadius"
         @update-selected-component-dip-pins="boardStore.updateSelectedComponentDipPins"
         @update-selected-component-dip-width="boardStore.updateSelectedComponentDipWidth"
+        @update-selected-component-pin-layout="boardStore.updateSelectedComponentPinLayout"
+        @update-selected-component-two-lead-style="boardStore.updateSelectedComponentTwoLeadStyle"
         @update-selected-component-lead-pitch="boardStore.updateSelectedComponentLeadPitch"
         @set-wire-type="boardStore.setActiveWireType"
         @update-selected-component-ref-des="boardStore.updateSelectedComponentRefDes"
@@ -121,6 +123,7 @@ onUnmounted(() => {
         :active-wire-type="activeWireType"
         :board="board"
         :pending-link-start="pendingLinkStart"
+        :show-ratsnest="showRatsnest"
         :selected-item="selectedItem"
         @inspect-hole="boardStore.inspectAtHole"
         @move-selected-component="boardStore.moveSelectedComponent"
@@ -131,6 +134,7 @@ onUnmounted(() => {
         @set-footprint="boardStore.setActiveFootprint"
         @select-item="boardStore.setSelectedItem"
         @set-tool="boardStore.setActiveTool"
+        @toggle-ratsnest="boardStore.toggleRatsnest"
       />
     </main>
 

@@ -1,4 +1,4 @@
-import type { PlacedComponent } from './types'
+import type { PinLayout, PlacedComponent } from './types'
 
 export const STRIPBOARD_HOLE_PITCH_MM = 2.54
 
@@ -111,13 +111,24 @@ export function getDipPinCount(component: PlacedComponent) {
     return null
   }
 
-  const minDipPins = footprint.minDipPins ?? 4
+  const layout = getPinLayout(component)
+  const minDipPins = layout === 'single-row' ? 1 : (footprint.minDipPins ?? 4)
   const maxDipPins = footprint.maxDipPins ?? 40
   const defaultDipPins = footprint.defaultDipPins ?? 8
   const rawPins = Math.round(component.dipPins ?? defaultDipPins)
-  const evenPins = rawPins % 2 === 0 ? rawPins : rawPins + 1
+  const normalizedPins = layout === 'single-row' ? rawPins : (rawPins % 2 === 0 ? rawPins : rawPins + 1)
 
-  return Math.max(minDipPins, Math.min(maxDipPins, evenPins))
+  return Math.max(minDipPins, Math.min(maxDipPins, normalizedPins))
+}
+
+export function getPinLayout(component: PlacedComponent): PinLayout {
+  const footprint = getFootprint(component.footprintId)
+
+  if (footprint.style !== 'dip') {
+    return 'single-row'
+  }
+
+  return component.pinLayout === 'single-row' ? 'single-row' : 'dual-row'
 }
 
 export function getDipWidth(component: PlacedComponent) {
@@ -182,6 +193,12 @@ export function getDipPins(component: PlacedComponent) {
   }
 
   const pinCount = getDipPinCount(component) ?? footprint.defaultDipPins ?? 8
+  const layout = getPinLayout(component)
+
+  if (layout === 'single-row') {
+    return Array.from({ length: pinCount }, (_, index) => ({ row: index, col: 0 }))
+  }
+
   const width = getDipWidth(component) ?? footprint.defaultDipWidth ?? 3
   const pinsPerSide = pinCount / 2
   const leftPins = Array.from({ length: pinsPerSide }, (_, index) => ({ row: index, col: 0 }))
