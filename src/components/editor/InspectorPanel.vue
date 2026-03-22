@@ -15,7 +15,6 @@ defineProps<{
 }>()
 
 defineEmits<{
-  setTool: [tool: ActiveTool]
   setWireType: [type: WireType]
   cancelPlacement: []
 }>()
@@ -41,42 +40,6 @@ const wireTypes: WireType[] = ['input', 'output', 'bidirectional', 'power', 'gnd
       <div class="rounded-2xl bg-orange-100 px-3 py-4 text-orange-950">
         <div class="text-xs uppercase tracking-[0.18em] text-orange-700">Storage</div>
         <div class="mt-2 text-lg font-semibold">{{ board.storageMode }}</div>
-      </div>
-    </section>
-
-    <section>
-      <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Tools</p>
-      <div class="mt-3 flex flex-wrap gap-2 text-sm">
-        <button class="rounded-full px-3 py-2" :class="activeTool === 'inspect' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-700'" @click="$emit('setTool', 'inspect')">
-          Inspect
-        </button>
-        <button class="rounded-full px-3 py-2" :class="activeTool === 'link' ? 'bg-sky-600 text-white' : 'bg-stone-100 text-stone-700'" @click="$emit('setTool', 'link')">
-          Link
-        </button>
-        <button class="rounded-full px-3 py-2" :class="activeTool === 'wire' ? 'bg-amber-500 text-stone-950' : 'bg-stone-100 text-stone-700'" @click="$emit('setTool', 'wire')">
-          Wire
-        </button>
-      </div>
-
-      <div class="mt-4 rounded-[24px] bg-stone-100 p-4 text-sm text-stone-700">
-        <p class="font-semibold text-stone-900">Current tool</p>
-        <p class="mt-2 capitalize">{{ activeTool }}</p>
-        <p v-if="activeTool === 'link' && pendingLinkStart" class="mt-2 text-xs text-stone-500">
-          Start selected at row {{ pendingLinkStart.row }}, col {{ pendingLinkStart.col }}. Click a second hole to finish the link.
-        </p>
-        <p v-else-if="activeTool === 'link'" class="mt-2 text-xs text-stone-500">
-          Click the first hole, then click the destination hole.
-        </p>
-        <p v-else-if="activeTool === 'wire'" class="mt-2 text-xs text-stone-500">
-          Click any hole to place an external wire terminal.
-        </p>
-        <button
-          v-if="activeTool !== 'inspect'"
-          class="mt-3 rounded-full border border-stone-300 bg-white px-3 py-2 text-xs font-medium text-stone-700"
-          @click="$emit('cancelPlacement')"
-        >
-          Cancel placement
-        </button>
       </div>
     </section>
 

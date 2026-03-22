@@ -12,6 +12,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   placeHole: [row: number, col: number]
+  setTool: [tool: ActiveTool]
 }>()
 
 const pitch = 18
@@ -23,6 +24,41 @@ const cols = computed(() => Array.from({ length: props.board.cols }, (_, index) 
 const holes = computed(() =>
   rows.value.flatMap((row) => cols.value.map((col) => ({ row, col, key: `${row}-${col}` }))),
 )
+const stripSegments = computed(() => {
+  const cutsByRow = new Map<number, number[]>()
+
+  for (const cut of props.board.cuts) {
+    const existing = cutsByRow.get(cut.row)
+
+    if (existing) {
+      existing.push(cut.col)
+    } else {
+      cutsByRow.set(cut.row, [cut.col])
+    }
+  }
+
+  return rows.value.flatMap((row) => {
+    const rowCuts = [...(cutsByRow.get(row) ?? [])].sort((a, b) => a - b)
+    const segments: Array<{ key: string; row: number; startCol: number; endCol: number }> = []
+    let startCol = 0
+
+    for (const cutCol of rowCuts) {
+      const endCol = cutCol - 1
+
+      if (endCol >= startCol) {
+        segments.push({ key: `${row}-${startCol}-${endCol}`, row, startCol, endCol })
+      }
+
+      startCol = cutCol + 1
+    }
+
+    if (startCol <= props.board.cols - 1) {
+      segments.push({ key: `${row}-${startCol}-${props.board.cols - 1}`, row, startCol, endCol: props.board.cols - 1 })
+    }
+
+    return segments
+  })
+})
 const svgElement = ref<SVGSVGElement | null>(null)
 const cursorPosition = ref<{ row: number; col: number } | null>(null)
 
@@ -32,6 +68,14 @@ function pointX(col: number) {
 
 function pointY(row: number) {
   return 32 + row * pitch
+}
+
+function stripX(startCol: number) {
+  return pointX(startCol) - 14
+}
+
+function stripWidth(startCol: number, endCol: number) {
+  return (endCol - startCol) * pitch + 28
 }
 
 function wireColor(type: string) {
@@ -47,6 +91,12 @@ function wireColor(type: string) {
     default:
       return '#d97706'
   }
+}
+
+function toolClasses(tool: ActiveTool) {
+  return props.activeTool === tool
+    ? 'rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-white'
+    : 'rounded-full border border-stone-300 bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700'
 }
 
 function updateCursorPosition(event: PointerEvent) {
@@ -90,15 +140,18 @@ function handleBoardClick() {
   <div class="h-full rounded-[30px] border border-black/10 bg-white/70 p-3 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.5)] backdrop-blur sm:p-5">
     <div class="flex h-full flex-col rounded-[24px] bg-[radial-gradient(circle_at_top,#fff7ed,transparent_28%),linear-gradient(180deg,#fde68a_0%,#f3e2a6_100%)] p-3 sm:p-4">
       <div class="mb-3 flex min-h-8 items-center justify-between gap-3 text-xs uppercase tracking-[0.24em] text-stone-600">
-        <span class="shrink-0">Editor Canvas</span>
+        <div class="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto">
+          <button :class="toolClasses('inspect')" @click="emit('setTool', 'inspect')">Inspect</button>
+          <button :class="toolClasses('cut')" @click="emit('setTool', 'cut')">Cut</button>
+          <button :class="toolClasses('link')" @click="emit('setTool', 'link')">Link</button>
+          <button :class="toolClasses('wire')" @click="emit('setTool', 'wire')">Wire</button>
+        </div>
+
         <div class="ml-auto flex min-w-0 flex-nowrap items-center justify-end gap-2 overflow-hidden text-right">
-          <span class="whitespace-nowrap">{{ board.rows }} rows · {{ board.cols }} columns</span>
           <span v-if="cursorPosition" class="whitespace-nowrap rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-50">
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}
           </span>
-          <span v-if="activeTool !== 'inspect'" class="whitespace-nowrap rounded-full bg-white/90 px-3 py-1 text-[10px] font-semibold tracking-[0.2em] text-stone-700">
-            {{ activeTool }}{{ activeTool === 'wire' ? `:${activeWireType}` : '' }}
-          </span>
+          <span class="whitespace-nowrap">{{ board.rows }} rows · {{ board.cols }} columns</span>
         </div>
       </div>
 
@@ -120,11 +173,11 @@ function handleBoardClick() {
 
           <g>
             <rect
-              v-for="row in rows"
-              :key="`strip-${row}`"
-              x="18"
-              :y="pointY(row) - 5"
-              :width="boardWidth - 36"
+              v-for="segment in stripSegments"
+              :key="segment.key"
+              :x="stripX(segment.startCol)"
+              :y="pointY(segment.row) - 5"
+              :width="stripWidth(segment.startCol, segment.endCol)"
               height="10"
               rx="5"
               fill="#bc6c25"
@@ -174,6 +227,38 @@ function handleBoardClick() {
               stroke-width="2"
               stroke-dasharray="4 3"
             />
+          </g>
+
+          <g>
+            <g v-for="cut in board.cuts" :key="cut.id">
+              <circle
+                :cx="pointX(cut.col)"
+                :cy="pointY(cut.row)"
+                r="7.5"
+                fill="#fff7ed"
+                stroke="#7f1d1d"
+                stroke-width="1.6"
+                opacity="0.95"
+              />
+              <line
+                :x1="pointX(cut.col) - 5.8"
+                :y1="pointY(cut.row) - 5.8"
+                :x2="pointX(cut.col) + 5.8"
+                :y2="pointY(cut.row) + 5.8"
+                stroke="#dc2626"
+                stroke-width="2.6"
+                stroke-linecap="round"
+              />
+              <line
+                :x1="pointX(cut.col) + 5.8"
+                :y1="pointY(cut.row) - 5.8"
+                :x2="pointX(cut.col) - 5.8"
+                :y2="pointY(cut.row) + 5.8"
+                stroke="#dc2626"
+                stroke-width="2.6"
+                stroke-linecap="round"
+              />
+            </g>
           </g>
 
           <g>

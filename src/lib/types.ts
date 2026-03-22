@@ -1,6 +1,6 @@
 export type StorageMode = 'local' | 'cloud'
 export type WireType = 'power' | 'gnd' | 'input' | 'output' | 'bidirectional'
-export type ActiveTool = 'inspect' | 'link' | 'wire'
+export type ActiveTool = 'inspect' | 'link' | 'wire' | 'cut'
 
 export interface Cut {
   id: string

@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { v4 as uuidv4 } from 'uuid'
 
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
-import type { ActiveTool, BoardState, Link, StorageMode, Wire, WireType } from '../lib/types'
+import type { ActiveTool, BoardState, Cut, Link, StorageMode, Wire, WireType } from '../lib/types'
 
 function createBoardState(mode: StorageMode = 'local'): BoardState {
   return {
@@ -66,6 +66,23 @@ export const useBoardStore = defineStore('board', () => {
     board.value.wires.push(wire)
   }
 
+  function toggleCut(row: number, col: number) {
+    const existingIndex = board.value.cuts.findIndex((cut) => cut.row === row && cut.col === col)
+
+    if (existingIndex >= 0) {
+      board.value.cuts.splice(existingIndex, 1)
+      return
+    }
+
+    const cut: Cut = {
+      id: uuidv4(),
+      row,
+      col,
+    }
+
+    board.value.cuts.push(cut)
+  }
+
   function setActiveTool(tool: ActiveTool) {
     activeTool.value = tool
 
@@ -85,6 +102,11 @@ export const useBoardStore = defineStore('board', () => {
 
     if (activeTool.value === 'wire') {
       createWire(row, col, activeWireType.value)
+      return
+    }
+
+    if (activeTool.value === 'cut') {
+      toggleCut(row, col)
       return
     }
 
@@ -154,6 +176,7 @@ export const useBoardStore = defineStore('board', () => {
     renameProject,
     setActiveTool,
     setActiveWireType,
+    toggleCut,
     placeAtHole,
     cancelPendingPlacement,
     setStorageMode,
