@@ -73,6 +73,7 @@ const emit = defineEmits<{
   newBoard: []
   importNetlist: [file: File]
   exportBoard: [format: ExportFormat]
+  about: []
   accountAction: []
 }>()
 
@@ -158,6 +159,9 @@ function selectExport(format: ExportFormat) {
         >
           Projects
         </RouterLink>
+        <button class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50" @click="$emit('about')">
+          About
+        </button>
         <input
           ref="fileInput"
           type="file"
@@ -173,7 +177,7 @@ function selectExport(format: ExportFormat) {
           class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:border-stone-400 hover:bg-stone-50"
           @click="$emit('accountAction')"
         >
-          Account
+          Logout
         </button>
         <template v-else>
           <button

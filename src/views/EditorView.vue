@@ -194,6 +194,18 @@ async function handleAccountAction() {
   }
 }
 
+function handleAbout() {
+  window.alert(
+    'vCad Online\n\n' +
+      'A Web based stripboard editor by Ido Roseman.\n\n' +
+      'Current features:\n' +
+      '- Local offline working board\n' +
+      '- Cloud backed projects\n' +
+      '- KiCad netlist and schematic import\n' +
+      '- SVG, PNG, and PDF export\n' ,
+  )
+}
+
 function handleKeyDown(event: KeyboardEvent) {
   if (activeTool.value !== 'inspect') {
     return
@@ -254,6 +266,7 @@ onUnmounted(() => {
       :cloud-save-state="cloudSaveState"
       @export-board="handleExportBoard"
       @import-netlist="handleImportNetlist"
+      @about="handleAbout"
       @rename="handleRename"
       @new-board="handleNewBoard"
       @account-action="handleAccountAction"
