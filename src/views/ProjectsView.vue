@@ -12,7 +12,9 @@ import {
   renameCloudProject,
 } from '../firebase/projects'
 import type { BoardState } from '../lib/types'
+import { useBoardStore } from '../stores/board'
 
+const boardStore = useBoardStore()
 const cloudProjects = ref<Array<{ id: string; name: string; updatedAtLabel: string; shareEnabled: boolean; isEmpty: boolean }>>([])
 const loading = ref(true)
 const errorMessage = ref<string | null>(null)
@@ -110,6 +112,7 @@ async function handleDeleteProject(projectId: string, name: string) {
 
   try {
     await deleteCloudProject(projectId)
+    boardStore.forgetCloudProject(projectId)
     await loadProjects()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Failed to delete project.'

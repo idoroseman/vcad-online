@@ -1398,6 +1398,17 @@ export const useBoardStore = defineStore('board', () => {
     cloudShareEnabled.value = false
   }
 
+  function forgetCloudProject(projectId: string) {
+    dequeueCloudSave(projectId)
+    cloudQueuedWrites.value = getCloudQueueLength()
+
+    if (cloudProjectId.value !== projectId) {
+      return
+    }
+
+    clearGuestCopy()
+  }
+
   function toggleRatsnest() {
     showRatsnest.value = !showRatsnest.value
   }
@@ -1494,5 +1505,6 @@ export const useBoardStore = defineStore('board', () => {
     enableShareLink,
     disableShareLink,
     clearGuestCopy,
+    forgetCloudProject,
   }
 })
