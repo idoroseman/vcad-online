@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
+
+type ExportFormat = 'svg' | 'png' | 'pdf'
 
 import AppToolbar from '../components/editor/AppToolbar.vue'
 import BoardCanvas from '../components/editor/BoardCanvas.vue'
@@ -11,6 +14,7 @@ import { useBoardStore } from '../stores/board'
 
 const boardStore = useBoardStore()
 const route = useRoute()
+const boardCanvas = ref<InstanceType<typeof BoardCanvas> | null>(null)
 
 const { board, counts, online, showRatsnest, activeTool, activeFootprintId, activeWireType, pendingLinkStart, selectedItem } =
   storeToRefs(boardStore)
@@ -34,6 +38,20 @@ function handleNewBoard() {
 
   if (shouldReplace) {
     boardStore.resetBoard()
+  }
+}
+
+function sanitizeFilenamePart(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return normalized || 'vcad-board'
+}
+
+async function handleExportBoard(format: ExportFormat) {
+  const filename = sanitizeFilenamePart(board.value.projectName)
+  const exported = await boardCanvas.value?.exportBoard(format, filename)
+
+  if (!exported) {
+    window.alert('Export failed.')
   }
 }
 
@@ -91,6 +109,7 @@ onUnmounted(() => {
       :online="online"
       :project-name="board.projectName"
       :storage-mode="board.storageMode"
+      @export-board="handleExportBoard"
       @import-netlist="handleImportNetlist"
       @rename="handleRename"
       @new-board="handleNewBoard"
@@ -116,6 +135,7 @@ onUnmounted(() => {
         @update-selected-component-dip-pins="boardStore.updateSelectedComponentDipPins"
         @update-selected-component-dip-width="boardStore.updateSelectedComponentDipWidth"
         @update-selected-component-pin-layout="boardStore.updateSelectedComponentPinLayout"
+        @update-selected-component-polarity-marked="boardStore.updateSelectedComponentPolarityMarked"
         @update-selected-component-two-lead-style="boardStore.updateSelectedComponentTwoLeadStyle"
         @update-selected-component-lead-pitch="boardStore.updateSelectedComponentLeadPitch"
         @set-wire-type="boardStore.setActiveWireType"
@@ -128,6 +148,7 @@ onUnmounted(() => {
         @update-selected-wire-type="boardStore.updateSelectedWireType"
       />
       <BoardCanvas
+        ref="boardCanvas"
         :active-tool="activeTool"
         :active-footprint-id="activeFootprintId"
         :active-wire-type="activeWireType"

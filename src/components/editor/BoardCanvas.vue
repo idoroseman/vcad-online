@@ -14,6 +14,7 @@ import { buildBoardConnectivity, buildNetNamesByConnectivityGroup, computeRatsne
 import type { ActiveTool, BoardState, WireType } from '../../lib/types'
 
 type SelectedItem = { kind: 'cut' | 'component' | 'link' | 'wire'; id: string } | null
+type ExportFormat = 'svg' | 'png' | 'pdf'
 
 type DragState =
   | {
@@ -233,6 +234,159 @@ const addOptions = [
   { label: 'Radial', footprintId: 'capacitor-radial-3' },
   { label: 'IC', footprintId: 'dip-8' },
 ]
+
+function serializeBoardSvg() {
+  if (!svgElement.value) {
+    return null
+  }
+
+  const clone = svgElement.value.cloneNode(true)
+
+  if (!(clone instanceof SVGSVGElement)) {
+    return null
+  }
+
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+  clone.setAttribute('version', '1.1')
+  clone.setAttribute('viewBox', `0 0 ${boardWidth.value} ${boardHeight.value}`)
+  clone.setAttribute('width', `${boardWidth.value}`)
+  clone.setAttribute('height', `${boardHeight.value}`)
+  clone.classList.remove('cursor-grabbing', 'cursor-grab', 'cursor-cell')
+
+  return new XMLSerializer().serializeToString(clone)
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+
+  anchor.href = url
+  anchor.download = filename
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+function exportSvg(filename: string) {
+  const serialized = serializeBoardSvg()
+
+  if (!serialized) {
+    return false
+  }
+
+  const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' })
+  downloadBlob(blob, filename)
+  return true
+}
+
+function svgToImage(serialized: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const image = new Image()
+
+    image.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(image)
+    }
+
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Could not render SVG for export.'))
+    }
+
+    image.src = url
+  })
+}
+
+async function exportPng(filename: string) {
+  const serialized = serializeBoardSvg()
+
+  if (!serialized) {
+    return false
+  }
+
+  const image = await svgToImage(serialized)
+  const scale = 3
+  const canvas = document.createElement('canvas')
+
+  canvas.width = Math.ceil(boardWidth.value * scale)
+  canvas.height = Math.ceil(boardHeight.value * scale)
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    return false
+  }
+
+  context.setTransform(scale, 0, 0, scale, 0, 0)
+  context.drawImage(image, 0, 0, boardWidth.value, boardHeight.value)
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((pngBlob) => resolve(pngBlob), 'image/png')
+  })
+
+  if (!blob) {
+    return false
+  }
+
+  downloadBlob(blob, filename)
+  return true
+}
+
+async function exportPdf(filename: string) {
+  const serialized = serializeBoardSvg()
+
+  if (!serialized) {
+    return false
+  }
+
+  const image = await svgToImage(serialized)
+  const { jsPDF } = await import('jspdf')
+  const canvas = document.createElement('canvas')
+
+  canvas.width = Math.ceil(boardWidth.value * 2)
+  canvas.height = Math.ceil(boardHeight.value * 2)
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    return false
+  }
+
+  context.setTransform(2, 0, 0, 2, 0, 0)
+  context.drawImage(image, 0, 0, boardWidth.value, boardHeight.value)
+
+  const imageData = canvas.toDataURL('image/png')
+  const pdf = new jsPDF({
+    orientation: boardWidth.value >= boardHeight.value ? 'landscape' : 'portrait',
+    unit: 'pt',
+    format: [boardWidth.value, boardHeight.value],
+    compress: true,
+  })
+
+  pdf.addImage(imageData, 'PNG', 0, 0, boardWidth.value, boardHeight.value)
+  pdf.save(filename)
+  return true
+}
+
+async function exportBoard(format: ExportFormat, filenameBase: string) {
+  if (format === 'svg') {
+    return exportSvg(`${filenameBase}.svg`)
+  }
+
+  if (format === 'png') {
+    return exportPng(`${filenameBase}.png`)
+  }
+
+  return exportPdf(`${filenameBase}.pdf`)
+}
+
+defineExpose({
+  exportBoard,
+})
 
 function pointX(col: number) {
   return 32 + col * pitch
@@ -716,6 +870,77 @@ function radialLeadEnd(component: BoardState['components'][number], pinIndex: nu
   }
 }
 
+function twoLeadPolarityMarker(component: BoardState['components'][number]) {
+  if (!component.polarityMarked) {
+    return null
+  }
+
+  const footprint = getFootprint(component.footprintId)
+  const refDes = component.refDes.trim().toUpperCase()
+  const kind = refDes.startsWith('D') ? 'line' : refDes.startsWith('C') ? 'plus' : 'dot'
+
+  if (footprint.style === 'axial') {
+    const body = getAxialBodyGeometry(component)
+
+    if (!body) {
+      return null
+    }
+
+    const startX = pointX(body.bodyStart.col)
+    const startY = pointY(body.bodyStart.row)
+    const endX = pointX(body.bodyEnd.col)
+    const endY = pointY(body.bodyEnd.row)
+    const length = Math.hypot(endX - startX, endY - startY) || 1
+    const ux = (endX - startX) / length
+    const uy = (endY - startY) / length
+    const px = -uy
+    const py = ux
+
+    return {
+      kind,
+      x: startX + ux * 8,
+      y: startY + uy * 8,
+      ux,
+      uy,
+      px,
+      py,
+    }
+  }
+
+  if (footprint.style === 'radial') {
+    const body = getRadialBodyGeometry(component)
+    const leadEntry = body?.leadEntries[0]
+
+    if (!body || !leadEntry) {
+      return null
+    }
+
+    const centerX = pointX(body.center.col)
+    const centerY = pointY(body.center.row)
+    const leadX = pointX(leadEntry.col)
+    const leadY = pointY(leadEntry.row)
+    const outwardLength = Math.hypot(leadX - centerX, leadY - centerY) || 1
+    const ox = (leadX - centerX) / outwardLength
+    const oy = (leadY - centerY) / outwardLength
+    const ux = -ox
+    const uy = -oy
+    const px = -uy
+    const py = ux
+
+    return {
+      kind,
+      x: centerX + ox * radialRadiusPx(component) * 0.52,
+      y: centerY + oy * radialRadiusPx(component) * 0.52,
+      ux,
+      uy,
+      px,
+      py,
+    }
+  }
+
+  return null
+}
+
 function dipBodyRect(component: BoardState['components'][number]) {
   if (getFootprint(component.footprintId).style !== 'dip') {
     return null
@@ -1085,6 +1310,45 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                     opacity="0.97"
                     :transform="`rotate(${axialAngle(component)} ${(pointX(getAxialBodyGeometry(component)!.bodyStart.col) + pointX(getAxialBodyGeometry(component)!.bodyEnd.col)) / 2} ${(pointY(getAxialBodyGeometry(component)!.bodyStart.row) + pointY(getAxialBodyGeometry(component)!.bodyEnd.row)) / 2})`"
                   />
+                  <line
+                    v-if="twoLeadPolarityMarker(component)?.kind === 'line'"
+                    :x1="twoLeadPolarityMarker(component)!.x - twoLeadPolarityMarker(component)!.px * 8"
+                    :y1="twoLeadPolarityMarker(component)!.y - twoLeadPolarityMarker(component)!.py * 8"
+                    :x2="twoLeadPolarityMarker(component)!.x + twoLeadPolarityMarker(component)!.px * 8"
+                    :y2="twoLeadPolarityMarker(component)!.y + twoLeadPolarityMarker(component)!.py * 8"
+                    stroke="#f97316"
+                    stroke-width="2.8"
+                    stroke-linecap="round"
+                  />
+                  <g v-else-if="twoLeadPolarityMarker(component)?.kind === 'plus'">
+                    <line
+                      :x1="twoLeadPolarityMarker(component)!.x - twoLeadPolarityMarker(component)!.px * 4"
+                      :y1="twoLeadPolarityMarker(component)!.y - twoLeadPolarityMarker(component)!.py * 4"
+                      :x2="twoLeadPolarityMarker(component)!.x + twoLeadPolarityMarker(component)!.px * 4"
+                      :y2="twoLeadPolarityMarker(component)!.y + twoLeadPolarityMarker(component)!.py * 4"
+                      stroke="#f97316"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                    />
+                    <line
+                      :x1="twoLeadPolarityMarker(component)!.x - twoLeadPolarityMarker(component)!.ux * 4"
+                      :y1="twoLeadPolarityMarker(component)!.y - twoLeadPolarityMarker(component)!.uy * 4"
+                      :x2="twoLeadPolarityMarker(component)!.x + twoLeadPolarityMarker(component)!.ux * 4"
+                      :y2="twoLeadPolarityMarker(component)!.y + twoLeadPolarityMarker(component)!.uy * 4"
+                      stroke="#f97316"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                    />
+                  </g>
+                  <circle
+                    v-else-if="twoLeadPolarityMarker(component)?.kind === 'dot'"
+                    :cx="twoLeadPolarityMarker(component)!.x"
+                    :cy="twoLeadPolarityMarker(component)!.y"
+                    r="2.5"
+                    fill="#f97316"
+                    stroke="#7c2d12"
+                    stroke-width="0.9"
+                  />
                 </template>
                 <template v-else-if="getFootprint(component.footprintId).style === 'radial' && getRadialBodyGeometry(component)">
                   <line
@@ -1113,6 +1377,45 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                     :stroke="isSelected('component', component.id) ? '#ea580c' : '#44403c'"
                     stroke-width="1.6"
                     opacity="0.97"
+                  />
+                  <line
+                    v-if="twoLeadPolarityMarker(component)?.kind === 'line'"
+                    :x1="twoLeadPolarityMarker(component)!.x - twoLeadPolarityMarker(component)!.px * 8"
+                    :y1="twoLeadPolarityMarker(component)!.y - twoLeadPolarityMarker(component)!.py * 8"
+                    :x2="twoLeadPolarityMarker(component)!.x + twoLeadPolarityMarker(component)!.px * 8"
+                    :y2="twoLeadPolarityMarker(component)!.y + twoLeadPolarityMarker(component)!.py * 8"
+                    stroke="#f97316"
+                    stroke-width="2.8"
+                    stroke-linecap="round"
+                  />
+                  <g v-else-if="twoLeadPolarityMarker(component)?.kind === 'plus'">
+                    <line
+                      :x1="twoLeadPolarityMarker(component)!.x - twoLeadPolarityMarker(component)!.px * 4"
+                      :y1="twoLeadPolarityMarker(component)!.y - twoLeadPolarityMarker(component)!.py * 4"
+                      :x2="twoLeadPolarityMarker(component)!.x + twoLeadPolarityMarker(component)!.px * 4"
+                      :y2="twoLeadPolarityMarker(component)!.y + twoLeadPolarityMarker(component)!.py * 4"
+                      stroke="#f97316"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                    />
+                    <line
+                      :x1="twoLeadPolarityMarker(component)!.x - twoLeadPolarityMarker(component)!.ux * 4"
+                      :y1="twoLeadPolarityMarker(component)!.y - twoLeadPolarityMarker(component)!.uy * 4"
+                      :x2="twoLeadPolarityMarker(component)!.x + twoLeadPolarityMarker(component)!.ux * 4"
+                      :y2="twoLeadPolarityMarker(component)!.y + twoLeadPolarityMarker(component)!.uy * 4"
+                      stroke="#f97316"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                    />
+                  </g>
+                  <circle
+                    v-else-if="twoLeadPolarityMarker(component)?.kind === 'dot'"
+                    :cx="twoLeadPolarityMarker(component)!.x"
+                    :cy="twoLeadPolarityMarker(component)!.y"
+                    r="2.5"
+                    fill="#f97316"
+                    stroke="#7c2d12"
+                    stroke-width="0.9"
                   />
                   <circle
                     :cx="radialLeadEnd(component, 0)?.x ?? pointX(getComponentPinHoles(component)[0].col)"

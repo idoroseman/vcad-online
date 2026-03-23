@@ -33,6 +33,7 @@ defineEmits<{
   updateSelectedComponentDipPins: [dipPins: number]
   updateSelectedComponentDipWidth: [dipWidth: number]
   updateSelectedComponentPinLayout: [pinLayout: PinLayout]
+  updateSelectedComponentPolarityMarked: [polarityMarked: boolean]
   updateSelectedComponentTwoLeadStyle: [style: 'axial' | 'radial' | 'single-row']
   updateSelectedComponentLeadPitch: [leadPitch: number]
   updateSelectedComponentRefDes: [refDes: string]
@@ -180,6 +181,11 @@ function getTwoLeadStyle(component: PlacedComponent) {
   }
 
   return footprint.style
+}
+
+function supportsPolarityMark(component: PlacedComponent) {
+  const style = getTwoLeadStyle(component)
+  return style === 'axial' || style === 'radial'
 }
 
 function toBodyDiameter(value: string, fallback: number) {
@@ -449,6 +455,19 @@ function toPinLayout(value: string, fallback: PinLayout) {
           <option value="radial">Radial</option>
           <option value="single-row">Single Row</option>
         </select>
+
+        <label
+          v-if="supportsPolarityMark(selectedComponent)"
+          class="mt-3 flex items-center gap-3 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700"
+        >
+          <input
+            type="checkbox"
+            class="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+            :checked="selectedComponent.polarityMarked ?? false"
+            @change="$emit('updateSelectedComponentPolarityMarked', ($event.target as HTMLInputElement).checked)"
+          />
+          <span>Polarity Mark</span>
+        </label>
 
         <label
           v-if="getFootprint(selectedComponent.footprintId).style !== 'dip'"

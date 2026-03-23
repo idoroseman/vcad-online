@@ -35,6 +35,7 @@ export interface PlacedComponent {
   row: number
   col: number
   rotation: 0 | 1 | 2 | 3
+  polarityMarked?: boolean
   leadPitch?: number
   bodyRadius?: number
   dipPins?: number

@@ -40,10 +40,21 @@ npm run build
 
 ## Near-Term Scope
 
-- KiCad XML netlist import
 - Interactive cut, link, and wire placement tools
 - Projects backed by Firebase for signed-in users
-- Print layout and export flows
+- Richer export flows beyond direct SVG, PNG, and PDF downloads
+
+## Export
+
+The toolbar now includes an `Export` dropdown for board-output downloads:
+
+- `SVG` exports the live board canvas as vector artwork.
+- `PNG` rasterizes the live board canvas for image export.
+- `PDF` packages the board output into a downloadable PDF.
+
+Current limitation:
+
+- Export still uses the current rendered board view directly, so future work is still needed for paper sizing, export cleanup, and advanced layout controls.
 
 ## KiCad Import
 

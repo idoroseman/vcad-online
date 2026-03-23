@@ -188,6 +188,7 @@ export const useBoardStore = defineStore('board', () => {
       row: 0,
       col: 0,
       rotation: defaultRotationForFootprint(footprintId),
+      polarityMarked: false,
       leadPitch: footprint.defaultLeadPitch,
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.style === 'dip' ? parsedDipPins ?? footprint.defaultDipPins : footprint.defaultDipPins,
@@ -437,6 +438,7 @@ export const useBoardStore = defineStore('board', () => {
       row,
       col,
       rotation: defaultRotationForFootprint(footprint.id),
+      polarityMarked: false,
       leadPitch: footprint.defaultLeadPitch,
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.defaultDipPins,
@@ -822,6 +824,26 @@ export const useBoardStore = defineStore('board', () => {
     component.leadPitch = getLeadPitch(nextComponent) ?? footprint.defaultLeadPitch
   }
 
+  function updateSelectedComponentPolarityMarked(polarityMarked: boolean) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style !== 'axial' && footprint.style !== 'radial') {
+      return
+    }
+
+    component.polarityMarked = polarityMarked
+  }
+
   function updateSelectedComponentTwoLeadStyle(style: 'axial' | 'radial' | 'single-row') {
     if (!selectedItem.value || selectedItem.value.kind !== 'component') {
       return
@@ -1118,6 +1140,7 @@ export const useBoardStore = defineStore('board', () => {
     updateSelectedComponentDipPins,
     updateSelectedComponentDipWidth,
     updateSelectedComponentPinLayout,
+    updateSelectedComponentPolarityMarked,
     updateSelectedComponentTwoLeadStyle,
     updateSelectedComponentLeadPitch,
     updateSelectedComponentValue,
