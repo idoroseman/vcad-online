@@ -55,6 +55,12 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 ```
 
+You can copy the checked-in template and fill in your Firebase values:
+
+```bash
+cp .env.example .env
+```
+
 Cloud mode is disabled until all of these values are present.
 
 ## Firestore Rules
@@ -65,6 +71,12 @@ Deploy rules with:
 
 ```bash
 npx firebase deploy --only firestore:rules --project <your-project-id>
+```
+
+Deploy the app and rules together with:
+
+```bash
+npm run deploy
 ```
 
 Current rules allow:
