@@ -142,6 +142,7 @@ onUnmounted(() => {
         @move-selected-link="boardStore.moveSelectedLink"
         @move-selected-wire="boardStore.moveSelectedWire"
         @set-footprint="boardStore.setActiveFootprint"
+        @crop-board="boardStore.cropBoard"
         @select-item="boardStore.setSelectedItem"
         @set-tool="boardStore.setActiveTool"
         @toggle-ratsnest="boardStore.toggleRatsnest"

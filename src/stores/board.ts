@@ -171,6 +171,11 @@ export const useBoardStore = defineStore('board', () => {
     return null
   }
 
+  function defaultRotationForFootprint(footprintId: string): PlacedComponent['rotation'] {
+    const footprint = getFootprint(footprintId)
+    return footprint.style === 'axial' ? 1 : 0
+  }
+
   function createPlacedImportedComponent(refDes: string, value: string, footprintHint?: string) {
     const footprintId = selectFootprintForImportedComponent(refDes, footprintHint)
     const footprint = getFootprint(footprintId)
@@ -182,7 +187,7 @@ export const useBoardStore = defineStore('board', () => {
       value: value.trim() || footprint.defaultValue,
       row: 0,
       col: 0,
-      rotation: 0,
+      rotation: defaultRotationForFootprint(footprintId),
       leadPitch: footprint.defaultLeadPitch,
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.style === 'dip' ? parsedDipPins ?? footprint.defaultDipPins : footprint.defaultDipPins,
@@ -296,6 +301,81 @@ export const useBoardStore = defineStore('board', () => {
     }
   }
 
+  function cropBoard() {
+    let minRow = Number.POSITIVE_INFINITY
+    let maxRow = Number.NEGATIVE_INFINITY
+    let minCol = Number.POSITIVE_INFINITY
+    let maxCol = Number.NEGATIVE_INFINITY
+
+    const includeHole = (row: number, col: number) => {
+      minRow = Math.min(minRow, row)
+      maxRow = Math.max(maxRow, row)
+      minCol = Math.min(minCol, col)
+      maxCol = Math.max(maxCol, col)
+    }
+
+    for (const cut of board.value.cuts) {
+      includeHole(cut.row, cut.col)
+    }
+
+    for (const wire of board.value.wires) {
+      includeHole(wire.row, wire.col)
+    }
+
+    for (const link of board.value.links) {
+      includeHole(link.fromRow, link.fromCol)
+      includeHole(link.toRow, link.toCol)
+    }
+
+    for (const component of board.value.components) {
+      const bounds = getComponentBounds(component)
+      includeHole(bounds.minRow, bounds.minCol)
+      includeHole(bounds.maxRow, bounds.maxCol)
+    }
+
+    if (!Number.isFinite(minRow) || !Number.isFinite(minCol) || !Number.isFinite(maxRow) || !Number.isFinite(maxCol)) {
+      return
+    }
+
+    const rowOffset = minRow
+    const colOffset = minCol
+
+    for (const cut of board.value.cuts) {
+      cut.row -= rowOffset
+      cut.col -= colOffset
+    }
+
+    for (const wire of board.value.wires) {
+      wire.row -= rowOffset
+      wire.col -= colOffset
+    }
+
+    for (const link of board.value.links) {
+      link.fromRow -= rowOffset
+      link.fromCol -= colOffset
+      link.toRow -= rowOffset
+      link.toCol -= colOffset
+    }
+
+    for (const component of board.value.components) {
+      component.row -= rowOffset
+      component.col -= colOffset
+    }
+
+    if (pendingLinkStart.value) {
+      pendingLinkStart.value = {
+        row: pendingLinkStart.value.row - rowOffset,
+        col: pendingLinkStart.value.col - colOffset,
+      }
+    }
+
+    const nextRows = clamp(Math.floor(maxRow - minRow + 1), 5, 200)
+    const nextCols = clamp(Math.floor(maxCol - minCol + 1), 8, 200)
+
+    board.value.rows = nextRows
+    board.value.cols = nextCols
+  }
+
   function setSelectedItem(item: SelectedItem) {
     selectedItem.value = item
   }
@@ -356,7 +436,7 @@ export const useBoardStore = defineStore('board', () => {
       value: footprint.defaultValue,
       row,
       col,
-      rotation: 0,
+      rotation: defaultRotationForFootprint(footprint.id),
       leadPitch: footprint.defaultLeadPitch,
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.defaultDipPins,
@@ -808,6 +888,7 @@ export const useBoardStore = defineStore('board', () => {
     const nextComponent: PlacedComponent = {
       ...component,
       footprintId: targetFootprint.id,
+      rotation: style === 'axial' ? defaultRotationForFootprint(targetFootprint.id) : component.rotation,
       leadPitch: targetFootprint.defaultLeadPitch,
       bodyRadius: targetFootprint.defaultBodyRadius,
       dipPins: undefined,
@@ -820,6 +901,7 @@ export const useBoardStore = defineStore('board', () => {
     }
 
     component.footprintId = targetFootprint.id
+    component.rotation = style === 'axial' ? defaultRotationForFootprint(targetFootprint.id) : component.rotation
     component.leadPitch = targetFootprint.defaultLeadPitch
     component.bodyRadius = targetFootprint.defaultBodyRadius
     component.dipPins = undefined
@@ -1014,6 +1096,7 @@ export const useBoardStore = defineStore('board', () => {
     selectedItem,
     resetBoard,
     resizeBoard,
+    cropBoard,
     setSelectedItem,
     setActiveFootprint,
     renameProject,

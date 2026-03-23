@@ -76,6 +76,7 @@ const emit = defineEmits<{
   moveSelectedLink: [fromRow: number, fromCol: number, toRow: number, toCol: number]
   moveSelectedWire: [row: number, col: number]
   toggleRatsnest: []
+  cropBoard: []
   selectItem: [item: SelectedItem]
 }>()
 
@@ -917,6 +918,12 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
             </div>
           </details>
           <button
+            class="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-stone-700"
+            @click="emit('cropBoard')"
+          >
+            Crop
+          </button>
+          <button
             class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-semibold tracking-[0.16em]"
             :class="props.showRatsnest ? 'border-sky-400 bg-sky-100 text-sky-900' : 'border-stone-300 bg-white text-stone-600'"
             @click="emit('toggleRatsnest')"
@@ -937,13 +944,16 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
             R {{ cursorPosition.row }} · C {{ cursorPosition.col }}
           </span>
           <span
-            v-if="unroutedCount > 0 || shortCount > 0"
             class="whitespace-nowrap rounded-full px-3 py-1 text-[10px] font-semibold tracking-[0.16em]"
-            :class="shortCount > 0 ? 'bg-red-100 text-red-900' : 'bg-amber-100 text-amber-900'"
+            :class="
+              shortCount > 0
+                ? 'bg-red-100 text-red-900'
+                : unroutedCount > 0
+                  ? 'bg-amber-100 text-amber-900'
+                  : 'bg-emerald-100 text-emerald-900'
+            "
           >
-            <template v-if="unroutedCount > 0">{{ unroutedCount }} unrouted</template>
-            <template v-if="unroutedCount > 0 && shortCount > 0"> · </template>
-            <template v-if="shortCount > 0">{{ shortCount }} short{{ shortCount === 1 ? '' : 's' }}</template>
+            {{ unroutedCount }} unrouted · {{ shortCount }} short{{ shortCount === 1 ? '' : 's' }}
           </span>
           <span class="whitespace-nowrap">{{ board.rows }} rows · {{ board.cols }} columns</span>
         </div>

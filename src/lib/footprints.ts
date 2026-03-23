@@ -36,7 +36,7 @@ export const footprintCatalog: FootprintDefinition[] = [
     prefix: 'R',
     defaultValue: '10k',
     pins: [],
-    defaultLeadPitch: 6,
+    defaultLeadPitch: 4,
     minLeadPitch: 3,
     maxLeadPitch: 24,
   },
@@ -85,7 +85,7 @@ export function getLeadPitch(component: PlacedComponent) {
 
   const minLeadPitch = footprint.minLeadPitch ?? (footprint.style === 'radial' ? 1 : 3)
   const maxLeadPitch = footprint.maxLeadPitch ?? 24
-  const defaultLeadPitch = footprint.defaultLeadPitch ?? (footprint.style === 'radial' ? 2 : 6)
+  const defaultLeadPitch = footprint.defaultLeadPitch ?? (footprint.style === 'radial' ? 2 : 4)
 
   return Math.max(minLeadPitch, Math.min(maxLeadPitch, Math.round(component.leadPitch ?? defaultLeadPitch)))
 }
