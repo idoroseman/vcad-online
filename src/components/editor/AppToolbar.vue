@@ -64,11 +64,11 @@ function selectExport(format: ExportFormat) {
         <button class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50" @click="$emit('newBoard')">
           New board
         </button>
-        <button class="rounded-full border border-sky-300 bg-sky-50 px-4 py-2 text-sm text-sky-800 transition hover:border-sky-400 hover:bg-sky-100" @click="openImportDialog">
+        <button class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50" @click="openImportDialog">
           Import KiCad
         </button>
         <details ref="exportMenu" class="relative z-50">
-          <summary class="list-none rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 transition hover:border-amber-400 hover:bg-amber-100 cursor-pointer">
+          <summary class="list-none rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50 cursor-pointer">
             <span class="inline-flex items-center gap-2">
               <span>Export</span>
               <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -89,9 +89,12 @@ function selectExport(format: ExportFormat) {
           </div>
         </details>
         <RouterLink
-          v-if="online"
-          class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50"
-          to="/projects"
+          :to="online ? '/projects' : ''"
+          :aria-disabled="!online"
+          :tabindex="online ? 0 : -1"
+          class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm transition"
+          :class="online ? 'text-stone-700 hover:border-stone-400 hover:bg-stone-50' : 'cursor-not-allowed text-stone-400 opacity-60'"
+          @click="!online && $event.preventDefault()"
         >
           Projects
         </RouterLink>
@@ -102,6 +105,21 @@ function selectExport(format: ExportFormat) {
           class="hidden"
           @change="handleFileChange"
         />
+      </div>
+
+      <div class="ml-auto flex items-center gap-2 sm:gap-3">
+        <RouterLink
+          class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50"
+          to="/login"
+        >
+          Log In
+        </RouterLink>
+        <RouterLink
+          class="rounded-full border border-amber-500 bg-amber-400 px-4 py-2 text-sm font-semibold text-stone-900 shadow-[0_8px_20px_-12px_rgba(180,83,9,0.65)] transition hover:border-amber-600 hover:bg-amber-300"
+          to="/login"
+        >
+          Sign Up
+        </RouterLink>
       </div>
     </div>
   </header>

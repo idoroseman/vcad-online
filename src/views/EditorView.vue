@@ -106,7 +106,7 @@ onUnmounted(() => {
 <template>
   <div class="min-h-screen bg-transparent text-stone-900">
     <AppToolbar
-      :online="online"
+      :online="offline"
       :project-name="board.projectName"
       :storage-mode="board.storageMode"
       @export-board="handleExportBoard"
@@ -172,7 +172,7 @@ onUnmounted(() => {
 
     <StatusBar
       :links="counts.links"
-      :online="online"
+      :online="offline"
       :project-name="board.projectName"
       :storage-mode="board.storageMode"
       :wires="counts.wires"
