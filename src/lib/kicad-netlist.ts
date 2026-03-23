@@ -583,6 +583,23 @@ function rotatePoint(x: number, y: number, rotation: number) {
   }
 }
 
+function mirrorPoint(x: number, y: number, mirror: string) {
+  if (mirror === 'x') {
+    return { x, y: -y }
+  }
+
+  if (mirror === 'y') {
+    return { x: -x, y }
+  }
+
+  return { x, y }
+}
+
+function symbolTransformPoint(x: number, y: number, rotation: number, mirror: string) {
+  const mirrored = mirrorPoint(x, y, mirror)
+  return rotatePoint(mirrored.x, mirrored.y, rotation)
+}
+
 function symbolPinPoints(symbol: Sexpr[], pinTemplatesByLibId: Map<string, SchematicPinTemplate[]>) {
   const libId = fieldValue(symbol, 'lib_id')
   const at = childrenByHead(symbol, 'at')[0]
@@ -596,6 +613,7 @@ function symbolPinPoints(symbol: Sexpr[], pinTemplatesByLibId: Map<string, Schem
   const originX = parseNumberAtom(at[1], 0)
   const originY = parseNumberAtom(at[2], 0)
   const rotation = parseNumberAtom(at[3], 0)
+  const mirror = fieldValue(symbol, 'mirror').toLowerCase()
 
   const instancePins = childrenByHead(symbol, 'pin')
     .map((pin) => (typeof pin[1] === 'string' ? pin[1].trim() : ''))
@@ -603,15 +621,19 @@ function symbolPinPoints(symbol: Sexpr[], pinTemplatesByLibId: Map<string, Schem
   const instancePinSet = new Set(instancePins)
 
   return templates
-    .filter((template) => template.unit === null || template.unit === unit)
+    // KiCad uses unit 0 for common pins (for example NE555 pins 1 and 8),
+    // so those pins must be included for any selected symbol unit.
+    .filter((template) => template.unit === null || template.unit === 0 || template.unit === unit)
     .filter((template) => instancePinSet.size === 0 || instancePinSet.has(template.pinNum))
     .map((template) => {
-      const rotated = rotatePoint(template.x, template.y, rotation)
+      // Library symbol coordinates use an upward Y axis, while schematic sheet
+      // coordinates use downward Y. Convert after mirror/rotation.
+      const transformed = symbolTransformPoint(template.x, template.y, rotation, mirror)
 
       return {
         pinNum: template.pinNum,
-        x: originX + rotated.x,
-        y: originY + rotated.y,
+        x: originX + transformed.x,
+        y: originY - transformed.y,
       }
     })
 }

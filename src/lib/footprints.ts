@@ -212,12 +212,31 @@ export function getComponentPinNumber(component: PlacedComponent, index: number)
 
   if (footprint.style === 'dip') {
     const pinCount = getDipPinCount(component) ?? footprint.defaultDipPins ?? 8
+    const layout = getPinLayout(component)
 
     if (index < 0 || index >= pinCount) {
       return null
     }
 
-    return String(index + 1)
+    if (layout === 'single-row') {
+      return String(index + 1)
+    }
+
+    const pin = getDipPins(component)[index]
+
+    if (!pin) {
+      return null
+    }
+
+    const leftCol = 0
+
+    if (pin.col === leftCol) {
+      return String(pin.row + 1)
+    }
+
+    return String(pinCount - pin.row)
+
+    
   }
 
   if (footprint.style === 'axial' || footprint.style === 'radial') {
@@ -241,18 +260,12 @@ export function getPinIndexForPinNumber(component: PlacedComponent, pinNumber: s
   const pinTotal = getComponentPinHoles(component).length
 
   for (let index = 0; index < pinTotal; index += 1) {
-    if (getComponentPinNumber(component, index) === normalizedPin || String(index + 1) === normalizedPin) {
+    if (getComponentPinNumber(component, index) === normalizedPin) {
       return index
     }
   }
 
-  const parsedPin = Number.parseInt(normalizedPin, 10)
-
-  if (Number.isNaN(parsedPin)) {
-    return null
-  }
-
-  return parsedPin >= 1 && parsedPin <= pinTotal ? parsedPin - 1 : null
+  return null
 }
 
 export function getComponentBounds(component: PlacedComponent) {
