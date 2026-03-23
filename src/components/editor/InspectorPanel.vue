@@ -120,6 +120,10 @@ function toRotation(value: string, fallback: PlacedComponent['rotation']) {
   return fallback
 }
 
+function nextRotation(rotation: PlacedComponent['rotation']): PlacedComponent['rotation'] {
+  return ((rotation + 1) % 4) as PlacedComponent['rotation']
+}
+
 function toLeadPitch(value: string, fallback: number) {
   const parsed = Number.parseInt(value, 10)
 
@@ -404,15 +408,30 @@ function toPinLayout(value: string, fallback: PinLayout) {
         />
 
         <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Rotation</label>
-        <select
-          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
-          :value="selectedComponent.rotation"
-          @change="$emit('updateSelectedComponentRotation', toRotation(($event.target as HTMLSelectElement).value, selectedComponent.rotation))"
-        >
-          <option v-for="rotation in rotationOptions" :key="`rotation-${rotation}`" :value="rotation">
-            {{ rotation * 90 }}°
-          </option>
-        </select>
+        <div class="mt-2 flex items-center gap-2">
+          <select
+            class="min-w-0 flex-1 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+            :value="selectedComponent.rotation"
+            @change="$emit('updateSelectedComponentRotation', toRotation(($event.target as HTMLSelectElement).value, selectedComponent.rotation))"
+          >
+            <option v-for="rotation in rotationOptions" :key="`rotation-${rotation}`" :value="rotation">
+              {{ rotation * 90 }}°
+            </option>
+          </select>
+          <button
+            type="button"
+            class="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50"
+            aria-label="Rotate component"
+            title="Rotate component"
+            @click="$emit('updateSelectedComponentRotation', nextRotation(selectedComponent.rotation))"
+          >
+            <svg viewBox="0 0 20 20" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14.5 6.5V2.5h-4" />
+              <path d="M14 14.5a6 6 0 1 1 .5-8" />
+              <path d="M10.5 2.5l4 4" />
+            </svg>
+          </button>
+        </div>
 
         <label
           v-if="supportsTwoLeadStyle(selectedComponent)"
