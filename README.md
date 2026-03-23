@@ -2,6 +2,9 @@
 
 vCad Online is a Vue 3 stripboard or veroboard layout editor inspired by VeeCAD, with an editor-first workflow.
 
+## Live App
+<https://vcad.idoroseman.com/>
+
 ## Current Implementation
 
 - Vue 3 + TypeScript + Vite
