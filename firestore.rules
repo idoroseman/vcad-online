@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /projects/{projectId} {
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+      allow get, delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+      allow update: if request.auth != null && (
+        resource.data.ownerUid == request.auth.uid ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
+      allow list: if request.auth != null;
+    }
+
+    match /sharedProjects/{shareToken} {
+      // Public unlisted link access.
+      allow get: if true;
+      allow list: if false;
+
+      // Owner can maintain token documents through the client.
+      allow create, update: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}

@@ -14,7 +14,11 @@ import {
   getPinLayout,
 } from '../lib/footprints'
 import { parseKiCadNetlist } from '../lib/kicad-netlist'
+import { dequeueCloudSave, enqueueCloudSave, getCloudQueueLength, getCloudQueueSnapshot } from '../lib/cloud-queue'
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
+import { waitForInitialAuthUser } from '../firebase/auth'
+import { getFirebaseAuth, isFirebaseEnabled } from '../firebase/client'
+import { disableCloudProjectShare, enableCloudProjectShare, loadCloudProjectById, saveCloudProjectBoard } from '../firebase/projects'
 import type {
   ActiveTool,
   BoardState,
@@ -35,6 +39,8 @@ type SelectedItem =
   | { kind: 'wire'; id: string }
   | null
 
+type CloudSaveState = 'idle' | 'saving' | 'saved' | 'queued' | 'error'
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
@@ -45,6 +51,31 @@ function isHoleWithinBoard(row: number, col: number, rows: number, cols: number)
 
 function normalizeRefDes(value: string) {
   return value.trim().toUpperCase()
+}
+
+function cloneBoardState(value: BoardState): BoardState {
+  return JSON.parse(JSON.stringify(value)) as BoardState
+}
+
+const CLOUD_AUTOSAVE_DELAY_MS = 1000
+
+function isRetryableCloudError(message: string) {
+  const normalized = message.toLowerCase()
+
+  return (
+    normalized.includes('offline') ||
+    normalized.includes('network') ||
+    normalized.includes('unavailable') ||
+    normalized.includes('timeout')
+  )
+}
+
+function isDiscardableQueuedCloudError(message: string) {
+  return (
+    message.includes('Cloud access denied') ||
+    message.includes('Project not found') ||
+    message.includes('Cloud project not found')
+  )
 }
 
 function createBoardState(mode: StorageMode = 'local'): BoardState {
@@ -70,6 +101,17 @@ export const useBoardStore = defineStore('board', () => {
   const activeWireType = ref<WireType>('input')
   const pendingLinkStart = ref<{ row: number; col: number } | null>(null)
   const selectedItem = ref<SelectedItem>(null)
+  const cloudProjectId = ref<string | null>(null)
+  const cloudSaveState = ref<CloudSaveState>('idle')
+  const cloudSaveError = ref<string | null>(null)
+  const cloudQueuedWrites = ref(getCloudQueueLength())
+  const cloudOwnerUid = ref<string | null>(null)
+  const cloudEnabled = ref(isFirebaseEnabled())
+  const cloudShareToken = ref<string | null>(null)
+  const cloudShareEnabled = ref(false)
+
+  let suppressNextCloudAutosave = false
+  let cloudAutosaveTimer: ReturnType<typeof setTimeout> | null = null
 
   const counts = computed(() => ({
     cuts: board.value.cuts.length,
@@ -77,6 +119,209 @@ export const useBoardStore = defineStore('board', () => {
     wires: board.value.wires.length,
     components: board.value.components.length,
   }))
+
+  function getCloudOwnerUid() {
+    const auth = getFirebaseAuth()
+    const uid = auth?.currentUser?.uid
+
+    if (uid) {
+      cloudOwnerUid.value = uid
+      return uid
+    }
+
+    return cloudOwnerUid.value
+  }
+
+  function setCloudOwner(userUid: string | null) {
+    cloudOwnerUid.value = userUid?.trim() || null
+  }
+
+  function isBoardEmpty(state: BoardState) {
+    return (
+      state.components.length === 0 &&
+      state.cuts.length === 0 &&
+      state.links.length === 0 &&
+      state.wires.length === 0 &&
+      !state.netlist
+    )
+  }
+
+  async function saveCloudSnapshot(snapshot: BoardState) {
+    if (snapshot.storageMode !== 'cloud') {
+      return
+    }
+
+    // Never save empty boards to cloud.
+    if (isBoardEmpty(snapshot)) {
+      cloudSaveError.value = null
+      cloudSaveState.value = 'idle'
+      return
+    }
+
+    const projectId = cloudProjectId.value
+
+    if (!projectId) {
+      return
+    }
+
+    let ownerUid = getCloudOwnerUid()
+
+    if (!ownerUid) {
+      const user = await waitForInitialAuthUser()
+      ownerUid = user?.uid ?? null
+
+      if (ownerUid) {
+        cloudOwnerUid.value = ownerUid
+      }
+    }
+
+    if (!ownerUid) {
+      cloudSaveState.value = 'error'
+      cloudSaveError.value = 'Sign in again to enable cloud saving.'
+      return
+    }
+
+    if (!online.value || !cloudEnabled.value) {
+      enqueueCloudSave({
+        projectId,
+        ownerUid,
+        board: snapshot,
+        queuedAt: new Date().toISOString(),
+      })
+      cloudQueuedWrites.value = getCloudQueueLength()
+      cloudSaveState.value = 'queued'
+      return
+    }
+
+    cloudSaveState.value = 'saving'
+    cloudSaveError.value = null
+
+    try {
+      await saveCloudProjectBoard({
+        id: projectId,
+        ownerUid,
+        name: snapshot.projectName,
+        board: snapshot,
+      })
+      cloudQueuedWrites.value = getCloudQueueLength()
+      cloudSaveState.value = 'saved'
+      cloudSaveError.value = null
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Cloud save failed.'
+
+      if (isRetryableCloudError(message)) {
+        enqueueCloudSave({
+          projectId,
+          ownerUid,
+          board: snapshot,
+          queuedAt: new Date().toISOString(),
+        })
+        cloudQueuedWrites.value = getCloudQueueLength()
+        cloudSaveState.value = 'queued'
+        cloudSaveError.value = null
+        return
+      }
+
+      cloudSaveState.value = 'error'
+      cloudSaveError.value = message
+    }
+  }
+
+  function scheduleCloudAutosave() {
+    if (cloudAutosaveTimer) {
+      clearTimeout(cloudAutosaveTimer)
+    }
+
+    if (isBoardEmpty(board.value)) {
+      cloudSaveError.value = null
+      cloudSaveState.value = 'idle'
+      return
+    }
+
+    const snapshot = cloneBoardState(board.value)
+    cloudAutosaveTimer = setTimeout(() => {
+      void saveCloudSnapshot(snapshot)
+    }, CLOUD_AUTOSAVE_DELAY_MS)
+  }
+
+  async function flushCloudQueue() {
+    if (!online.value || !cloudEnabled.value) {
+      return
+    }
+
+    // Purge stale entries that belong to a different (or missing) owner before processing.
+    // This cleans up old guest-UID entries and entries from previous sessions.
+    const currentUid = getCloudOwnerUid()
+    for (const entry of getCloudQueueSnapshot()) {
+      if (!entry.ownerUid || (currentUid && entry.ownerUid !== currentUid)) {
+        console.warn('Purging stale cloud queue entry for project', entry.projectId, '(ownerUid mismatch)')
+        dequeueCloudSave(entry.projectId)
+      }
+    }
+
+    const queue = getCloudQueueSnapshot()
+    const activeProjectQueueId = cloudProjectId.value
+    const tracksActiveProject = Boolean(
+      activeProjectQueueId && queue.some((entry) => entry.projectId === activeProjectQueueId),
+    )
+
+    if (queue.length === 0) {
+      cloudQueuedWrites.value = 0
+      return
+    }
+
+    if (tracksActiveProject) {
+      cloudSaveState.value = 'saving'
+      cloudSaveError.value = null
+    }
+
+    for (const entry of queue) {
+      const isActiveEntry = entry.projectId === activeProjectQueueId
+
+      if (!entry.ownerUid) {
+        dequeueCloudSave(entry.projectId)
+        continue
+      }
+
+      try {
+        await saveCloudProjectBoard({
+          id: entry.projectId,
+          ownerUid: entry.ownerUid,
+          name: entry.board.projectName,
+          board: entry.board,
+        })
+        dequeueCloudSave(entry.projectId)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to flush queued cloud saves.'
+
+        if (isDiscardableQueuedCloudError(message)) {
+          dequeueCloudSave(entry.projectId)
+          continue
+        }
+
+        cloudQueuedWrites.value = getCloudQueueLength()
+
+        if (isActiveEntry) {
+          if (isRetryableCloudError(message)) {
+            cloudSaveState.value = 'queued'
+            cloudSaveError.value = null
+          } else {
+            cloudSaveState.value = 'error'
+            cloudSaveError.value = message
+          }
+        }
+
+        return
+      }
+    }
+
+    cloudQueuedWrites.value = getCloudQueueLength()
+
+    if (tracksActiveProject) {
+      cloudSaveState.value = 'saved'
+      cloudSaveError.value = null
+    }
+  }
 
   function normalizeHole(row: number, col: number) {
     return {
@@ -241,6 +486,11 @@ export const useBoardStore = defineStore('board', () => {
 
   function resetBoard() {
     board.value = createBoardState('local')
+    cloudProjectId.value = null
+    cloudSaveState.value = 'idle'
+    cloudSaveError.value = null
+    cloudShareToken.value = null
+    cloudShareEnabled.value = false
   }
 
   function resizeBoard(rows: number, cols: number) {
@@ -1064,18 +1314,88 @@ export const useBoardStore = defineStore('board', () => {
 
   function setStorageMode(mode: StorageMode) {
     board.value.storageMode = mode
+
+    if (mode === 'local') {
+      cloudProjectId.value = null
+      cloudSaveState.value = 'idle'
+      cloudSaveError.value = null
+      cloudShareToken.value = null
+      cloudShareEnabled.value = false
+    }
   }
 
-  function loadCloudProject(projectId: string) {
-    board.value = {
-      ...createBoardState('cloud'),
-      projectName: `Cloud Project ${projectId}`,
+  async function loadCloudProject(projectId: string) {
+    cloudProjectId.value = projectId
+
+    if (!cloudEnabled.value) {
+      suppressNextCloudAutosave = true
+      board.value = {
+        ...createBoardState('cloud'),
+        projectName: `Cloud Project ${projectId}`,
+      }
+      cloudSaveState.value = 'queued'
+      cloudSaveError.value = 'Firebase is not configured. Set VITE_FIREBASE_* values to enable cloud sync.'
+      return
     }
+
+    cloudSaveState.value = 'saving'
+    cloudSaveError.value = null
+
+    try {
+      const cloudProject = await loadCloudProjectById(projectId)
+
+      suppressNextCloudAutosave = true
+      board.value = {
+        ...cloudProject.board,
+        storageMode: 'cloud',
+        projectName: cloudProject.name || cloudProject.board.projectName,
+      }
+      cloudShareToken.value = cloudProject.shareToken ?? null
+      cloudShareEnabled.value = Boolean(cloudProject.shareEnabled)
+      cloudSaveState.value = 'saved'
+      void flushCloudQueue()
+    } catch (error) {
+      suppressNextCloudAutosave = true
+      board.value = {
+        ...createBoardState('cloud'),
+        projectName: `Cloud Project ${projectId}`,
+      }
+      cloudSaveState.value = 'error'
+      cloudSaveError.value = error instanceof Error ? error.message : 'Unable to load cloud project.'
+      cloudShareToken.value = null
+      cloudShareEnabled.value = false
+    }
+  }
+
+  async function enableShareLink() {
+    if (!cloudProjectId.value) {
+      throw new Error('Open a cloud project before enabling sharing.')
+    }
+
+    const token = await enableCloudProjectShare(cloudProjectId.value)
+    cloudShareEnabled.value = true
+    cloudShareToken.value = token
+    return token
+  }
+
+  async function disableShareLink() {
+    if (!cloudProjectId.value) {
+      return
+    }
+
+    await disableCloudProjectShare(cloudProjectId.value)
+    cloudShareEnabled.value = false
+    cloudShareToken.value = null
   }
 
   function clearGuestCopy() {
     clearGuestSession()
     board.value = createBoardState('local')
+    cloudProjectId.value = null
+    cloudSaveState.value = 'idle'
+    cloudSaveError.value = null
+    cloudShareToken.value = null
+    cloudShareEnabled.value = false
   }
 
   function toggleRatsnest() {
@@ -1089,6 +1409,7 @@ export const useBoardStore = defineStore('board', () => {
   if (typeof window !== 'undefined') {
     window.addEventListener('online', () => {
       online.value = true
+      void flushCloudQueue()
     })
 
     window.addEventListener('offline', () => {
@@ -1101,7 +1422,15 @@ export const useBoardStore = defineStore('board', () => {
     (value) => {
       if (value.storageMode === 'local') {
         saveGuestSession(value)
+        return
       }
+
+      if (suppressNextCloudAutosave) {
+        suppressNextCloudAutosave = false
+        return
+      }
+
+      scheduleCloudAutosave()
     },
     { deep: true },
   )
@@ -1116,6 +1445,13 @@ export const useBoardStore = defineStore('board', () => {
     activeWireType,
     pendingLinkStart,
     selectedItem,
+    cloudProjectId,
+    cloudSaveState,
+    cloudSaveError,
+    cloudQueuedWrites,
+    cloudEnabled,
+    cloudShareToken,
+    cloudShareEnabled,
     resetBoard,
     resizeBoard,
     cropBoard,
@@ -1153,6 +1489,10 @@ export const useBoardStore = defineStore('board', () => {
     toggleRatsnest,
     setShowRatsnest,
     loadCloudProject,
+    flushCloudQueue,
+    setCloudOwner,
+    enableShareLink,
+    disableShareLink,
     clearGuestCopy,
   }
 })

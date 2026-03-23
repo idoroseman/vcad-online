@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { footprintCatalog, getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch, getPinLayout } from '../../lib/footprints'
+import { getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch, getPinLayout } from '../../lib/footprints'
 import type { ActiveTool, BoardState, PinLayout, PlacedComponent, WireType } from '../../lib/types'
 
 const props = defineProps<{
@@ -47,8 +47,6 @@ defineEmits<{
 const wireTypes: WireType[] = ['input', 'output', 'bidirectional', 'power', 'gnd']
 const rotationOptions: PlacedComponent['rotation'][] = [0, 1, 2, 3]
 const activeTab = ref<'project' | 'properties'>('project')
-
-const activeFootprint = computed(() => getFootprint(props.activeFootprintId))
 
 const selectedComponent = computed(() => {
   if (!props.selectedItem || props.selectedItem.kind !== 'component') {
@@ -258,52 +256,6 @@ function toPinLayout(value: string, fallback: PinLayout) {
         </p>
       </section>
 
-      <section class="grid grid-cols-2 gap-3 text-sm">
-        <div class="rounded-2xl bg-stone-900 px-3 py-4 text-stone-50">
-          <div class="text-xs uppercase tracking-[0.18em] text-stone-300">Board</div>
-          <div class="mt-2 text-lg font-semibold">{{ board.rows }} × {{ board.cols }}</div>
-        </div>
-        <div class="rounded-2xl bg-orange-100 px-3 py-4 text-orange-950">
-          <div class="text-xs uppercase tracking-[0.18em] text-orange-700">Storage</div>
-          <div class="mt-2 text-lg font-semibold">{{ board.storageMode }}</div>
-        </div>
-      </section>
-
-      <section v-if="activeTool === 'wire'">
-        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Wire Type</p>
-        <div class="mt-3 flex flex-wrap gap-2 text-sm">
-          <button
-            v-for="type in wireTypes"
-            :key="type"
-            class="rounded-full px-3 py-2 capitalize"
-            :class="activeWireType === type ? 'bg-amber-500 text-stone-950' : 'bg-stone-100 text-stone-700'"
-            @click="$emit('setWireType', type)"
-          >
-            {{ type }}
-          </button>
-        </div>
-      </section>
-
-      <section v-if="activeTool === 'component'">
-        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Footprint</p>
-        <div class="mt-3 space-y-2 text-sm">
-          <button
-            v-for="footprint in footprintCatalog"
-            :key="footprint.id"
-            class="w-full rounded-2xl border px-3 py-3 text-left"
-            :class="activeFootprintId === footprint.id ? 'border-stone-900 bg-stone-900 text-stone-50' : 'border-stone-200 bg-stone-50 text-stone-700'"
-            @click="$emit('setFootprint', footprint.id)"
-          >
-            <div class="font-semibold">{{ footprint.label }}</div>
-            <div class="mt-1 text-xs opacity-75">{{ footprint.prefix }} · {{ footprint.defaultValue }}</div>
-          </button>
-        </div>
-        <div class="mt-3 rounded-2xl bg-stone-100 px-3 py-3 text-sm text-stone-700">
-          <p class="font-medium text-stone-900">Current footprint</p>
-          <p class="mt-1">{{ activeFootprint.label }}</p>
-        </div>
-      </section>
-
       <section>
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">Objects</p>
         <dl class="mt-3 space-y-2 text-sm text-stone-700">
@@ -326,7 +278,14 @@ function toPinLayout(value: string, fallback: PinLayout) {
         </dl>
       </section>
 
-      <section class="rounded-[24px] bg-linear-to-br from-sky-50 to-cyan-100 p-4 text-sm text-sky-950">
+      <section class="grid grid-cols-2 gap-3 text-sm">
+        <div class="rounded-2xl bg-orange-100 px-3 py-4 text-orange-950">
+          <div class="text-xs uppercase tracking-[0.18em] text-orange-700">Storage</div>
+          <div class="mt-2 text-lg font-semibold">{{ board.storageMode }}</div>
+        </div>
+      </section>
+
+      <section v-if="false" class="rounded-[24px] bg-linear-to-br from-sky-50 to-cyan-100 p-4 text-sm text-sky-950">
         <p class="font-semibold">Next implementation targets</p>
         <ul class="mt-3 space-y-2 text-sky-900/80">
           <li>KiCad schematic import</li>

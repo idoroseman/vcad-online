@@ -8,9 +8,63 @@ const props = defineProps<{
   projectName: string
   online: boolean
   storageMode: 'local' | 'cloud'
+  isBoardEmpty?: boolean
+  isAuthenticated?: boolean
+  cloudSaveState?: 'idle' | 'saving' | 'saved' | 'queued' | 'error'
+  cloudQueuedWrites?: number
+  cloudEnabled?: boolean
 }>()
 
-const storageLabel = computed(() => (props.storageMode === 'cloud' ? 'Cloud project' : 'Offline working copy'))
+const storageLabel = computed(() => {
+  if (props.storageMode === 'cloud') {
+    return 'Cloud storage'
+  }
+
+  // If authenticated and online, show as "Cloud storage" (will auto-migrate when populated)
+  if (props.isAuthenticated && props.online) {
+    return 'Cloud storage'
+  }
+
+  return 'Offline working copy'
+})
+const cloudStatusLabel = computed(() => {
+  const showBadge = props.storageMode === 'cloud' || (props.isAuthenticated && props.online)
+
+  if (!showBadge) {
+    return ''
+  }
+
+  if (props.isBoardEmpty) {
+    return 'Empty'
+  }
+
+  if (props.storageMode !== 'cloud') {
+    // Local mode but authenticated and online: no error states yet
+    return 'Ready'
+  }
+
+  if (props.cloudEnabled === false) {
+    return 'Cloud disabled'
+  }
+
+  if (props.cloudSaveState === 'saving') {
+    return 'Saving...'
+  }
+
+  if (props.cloudSaveState === 'queued') {
+    return props.cloudQueuedWrites && props.cloudQueuedWrites > 0 ? `Queued ${props.cloudQueuedWrites}` : 'Queued'
+  }
+
+  if (props.cloudSaveState === 'error') {
+    return 'Save error'
+  }
+
+  if (props.cloudSaveState === 'saved') {
+    return 'Saved'
+  }
+
+  return 'Ready'
+})
 const fileInput = ref<HTMLInputElement | null>(null)
 const exportMenu = ref<HTMLDetailsElement | null>(null)
 
@@ -19,6 +73,7 @@ const emit = defineEmits<{
   newBoard: []
   importNetlist: [file: File]
   exportBoard: [format: ExportFormat]
+  accountAction: []
 }>()
 
 function openImportDialog() {
@@ -55,7 +110,12 @@ function selectExport(format: ExportFormat) {
         </div>
         <div class="mr-1">
           <div class="text-sm font-semibold text-stone-900">{{ projectName }}</div>
-          <div class="text-xs text-stone-500">{{ storageLabel }}</div>
+          <div class="text-xs text-stone-500">
+            {{ storageLabel }}
+            <span v-if="storageMode === 'cloud' || (isAuthenticated && online)" class="ml-2 rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-700">
+              {{ cloudStatusLabel }}
+            </span>
+          </div>
         </div>
 
         <button class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-stone-400 hover:bg-stone-50" @click="$emit('rename')">
@@ -108,18 +168,27 @@ function selectExport(format: ExportFormat) {
       </div>
 
       <div class="ml-auto flex items-center gap-2 sm:gap-3">
-        <RouterLink
-          class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50"
-          to="/login"
+        <button
+          v-if="isAuthenticated"
+          class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:border-stone-400 hover:bg-stone-50"
+          @click="$emit('accountAction')"
         >
-          Log In
-        </RouterLink>
-        <RouterLink
-          class="rounded-full border border-amber-500 bg-amber-400 px-4 py-2 text-sm font-semibold text-stone-900 shadow-[0_8px_20px_-12px_rgba(180,83,9,0.65)] transition hover:border-amber-600 hover:bg-amber-300"
-          to="/login"
-        >
-          Sign Up
-        </RouterLink>
+          Account
+        </button>
+        <template v-else>
+          <button
+            class="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50"
+            @click="$emit('accountAction')"
+          >
+            Log In
+          </button>
+          <button
+            class="rounded-full border border-amber-500 bg-amber-400 px-4 py-2 text-sm font-semibold text-stone-900 shadow-[0_8px_20px_-12px_rgba(180,83,9,0.65)] transition hover:border-amber-600 hover:bg-amber-300"
+            @click="$emit('accountAction')"
+          >
+            Sign Up
+          </button>
+        </template>
       </div>
     </div>
   </header>

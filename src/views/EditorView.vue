@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
-import { ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 type ExportFormat = 'svg' | 'png' | 'pdf'
 
@@ -10,17 +9,110 @@ import AppToolbar from '../components/editor/AppToolbar.vue'
 import BoardCanvas from '../components/editor/BoardCanvas.vue'
 import InspectorPanel from '../components/editor/InspectorPanel.vue'
 import StatusBar from '../components/editor/StatusBar.vue'
+import { createCloudProject } from '../firebase/projects'
+import { observeAuthState, signOutCurrentUser, waitForInitialAuthUser } from '../firebase/auth'
+import { clearGuestSession } from '../lib/local-session'
 import { useBoardStore } from '../stores/board'
 
 const boardStore = useBoardStore()
 const route = useRoute()
+const router = useRouter()
 const boardCanvas = ref<InstanceType<typeof BoardCanvas> | null>(null)
+const isAuthenticated = ref(false)
+const currentUserUid = ref<string | null>(null)
+const isMigratingToCloud = ref(false)
+let stopAuthObserver: (() => void) | null = null
 
-const { board, counts, online, showRatsnest, activeTool, activeFootprintId, activeWireType, pendingLinkStart, selectedItem } =
-  storeToRefs(boardStore)
+const {
+  board,
+  counts,
+  online,
+  showRatsnest,
+  activeTool,
+  activeFootprintId,
+  activeWireType,
+  pendingLinkStart,
+  selectedItem,
+  cloudEnabled,
+  cloudQueuedWrites,
+  cloudSaveError,
+  cloudSaveState,
+} = storeToRefs(boardStore)
 
-if (typeof route.params.id === 'string' && route.params.id.length > 0) {
-  boardStore.loadCloudProject(route.params.id)
+const isBoardEmpty = computed(() => {
+  const b = board.value
+  return (
+    b.components.length === 0 &&
+    b.cuts.length === 0 &&
+    b.links.length === 0 &&
+    b.wires.length === 0 &&
+    !b.netlist
+  )
+})
+
+watch(
+  () => route.params.id,
+  (projectId) => {
+    if (typeof projectId === 'string' && projectId.length > 0) {
+      void boardStore.loadCloudProject(projectId)
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  [currentUserUid, board, () => route.params.id],
+  ([uid]) => {
+    if (uid) {
+      void migrateLocalBoardToCloud(uid)
+    }
+  },
+  { deep: true, immediate: true },
+)
+
+/** Returns true once the board has actual placed content. */
+function isBoardPopulated() {
+  const b = board.value
+  return (
+    b.components.length > 0 ||
+    b.cuts.length > 0 ||
+    b.links.length > 0 ||
+    b.wires.length > 0
+  )
+}
+
+async function migrateLocalBoardToCloud(ownerUid: string) {
+  if (isMigratingToCloud.value) {
+    return
+  }
+
+  if (board.value.storageMode !== 'local' || !isBoardPopulated()) {
+    return
+  }
+
+  if (typeof route.params.id === 'string' && route.params.id.length > 0) {
+    return
+  }
+
+  isMigratingToCloud.value = true
+
+  try {
+    const snapshot = JSON.parse(JSON.stringify(board.value)) as typeof board.value
+    snapshot.storageMode = 'cloud'
+    const cloudProjectId = await createCloudProject({
+      ownerUid,
+      name: snapshot.projectName,
+      board: snapshot,
+    })
+    // Prevent this local board from being re-migrated after a page refresh.
+    clearGuestSession()
+    await router.replace(`/editor/${cloudProjectId}`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to migrate local board to cloud project.'
+    window.alert(message)
+  } finally {
+    isMigratingToCloud.value = false
+  }
 }
 
 function handleRename() {
@@ -31,14 +123,18 @@ function handleRename() {
   }
 }
 
-function handleNewBoard() {
+async function handleNewBoard() {
   const shouldReplace = window.confirm(
     'Start a new board? In guest mode this replaces the current offline working project.',
   )
 
-  if (shouldReplace) {
-    boardStore.resetBoard()
+  if (!shouldReplace) {
+    return
   }
+
+  boardStore.resetBoard()
+  clearGuestSession()
+  await router.replace('/')
 }
 
 function sanitizeFilenamePart(value: string) {
@@ -77,6 +173,27 @@ async function handleImportNetlist(file: File) {
   }
 }
 
+async function handleAccountAction() {
+  if (!isAuthenticated.value) {
+    await router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+
+  const shouldSignOut = window.confirm('Signed in account detected. Sign out now?')
+
+  if (!shouldSignOut) {
+    return
+  }
+
+  try {
+    await signOutCurrentUser()
+    await router.push('/')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to sign out.'
+    window.alert(message)
+  }
+}
+
 function handleKeyDown(event: KeyboardEvent) {
   if (activeTool.value !== 'inspect') {
     return
@@ -95,10 +212,31 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
+  void waitForInitialAuthUser().then((user) => {
+    if (!user) {
+      return
+    }
+
+    isAuthenticated.value = true
+    currentUserUid.value = user.uid
+    boardStore.setCloudOwner(user.uid)
+    void migrateLocalBoardToCloud(user.uid)
+  })
+
+  stopAuthObserver = observeAuthState((user) => {
+    isAuthenticated.value = Boolean(user)
+    currentUserUid.value = user?.uid ?? null
+    boardStore.setCloudOwner(user?.uid ?? null)
+
+    if (user) {
+      void migrateLocalBoardToCloud(user.uid)
+    }
+  })
   window.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
+  stopAuthObserver?.()
   window.removeEventListener('keydown', handleKeyDown)
 })
 </script>
@@ -106,13 +244,19 @@ onUnmounted(() => {
 <template>
   <div class="min-h-screen bg-transparent text-stone-900">
     <AppToolbar
-      :online="offline"
+      :online="online"
       :project-name="board.projectName"
       :storage-mode="board.storageMode"
+      :is-board-empty="isBoardEmpty"
+      :is-authenticated="isAuthenticated"
+      :cloud-enabled="cloudEnabled"
+      :cloud-queued-writes="cloudQueuedWrites"
+      :cloud-save-state="cloudSaveState"
       @export-board="handleExportBoard"
       @import-netlist="handleImportNetlist"
       @rename="handleRename"
       @new-board="handleNewBoard"
+      @account-action="handleAccountAction"
     />
 
     <main class="grid min-h-[calc(100vh-115px)] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -171,11 +315,9 @@ onUnmounted(() => {
     </main>
 
     <StatusBar
-      :links="counts.links"
-      :online="offline"
-      :project-name="board.projectName"
-      :storage-mode="board.storageMode"
-      :wires="counts.wires"
+      :cloud-queued-writes="cloudQueuedWrites"
+      :cloud-save-error="cloudSaveError"
+      :cloud-save-state="cloudSaveState"
     />
   </div>
 </template>
