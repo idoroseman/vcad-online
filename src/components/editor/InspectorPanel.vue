@@ -47,6 +47,8 @@ defineEmits<{
 
 const wireTypes: WireType[] = ['input', 'output', 'bidirectional', 'power', 'gnd']
 const rotationOptions: PlacedComponent['rotation'][] = [0, 1, 2, 3]
+                    // blue,      teal,     red,        orange,    yellow,    white,     purple,    dark blue, green,     pink
+const colorPresets = ['#2563eb', '#0f766e', '#dc2626', '#d97706', '#fafc15', '#ffffff', '#7c3aed', '#0f172a', '#16a34a', '#db2777']
 const activeTab = ref<'project' | 'properties'>('project')
 
 const selectedComponent = computed(() => {
@@ -585,6 +587,18 @@ function wireTypeColor(type: WireType) {
           />
           <span class="text-xs text-stone-500">{{ selectedLink.color ?? '#2563eb' }}</span>
         </div>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button
+            v-for="preset in colorPresets"
+            :key="`link-${preset}`"
+            type="button"
+            class="h-6 w-6 rounded-full border transition"
+            :class="(selectedLink.color ?? '#2563eb') === preset ? 'border-stone-900 ring-2 ring-stone-300' : 'border-stone-300 hover:border-stone-500'"
+            :style="{ backgroundColor: preset }"
+            :title="preset"
+            @click="$emit('updateSelectedLinkColor', preset)"
+          />
+        </div>
       </section>
 
       <section v-if="selectedWire" class="rounded-2xl bg-stone-100 p-4 text-sm text-stone-700">
@@ -643,6 +657,18 @@ function wireTypeColor(type: WireType) {
             @input="$emit('updateSelectedWireColor', ($event.target as HTMLInputElement).value)"
           />
           <span class="text-xs text-stone-500">{{ selectedWire.color ?? wireTypeColor(selectedWire.type) }}</span>
+        </div>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button
+            v-for="preset in colorPresets"
+            :key="`wire-${preset}`"
+            type="button"
+            class="h-6 w-6 rounded-full border transition"
+            :class="(selectedWire.color ?? wireTypeColor(selectedWire.type)) === preset ? 'border-stone-900 ring-2 ring-stone-300' : 'border-stone-300 hover:border-stone-500'"
+            :style="{ backgroundColor: preset }"
+            :title="preset"
+            @click="$emit('updateSelectedWireColor', preset)"
+          />
         </div>
 
         <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Note</label>
