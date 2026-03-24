@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid'
 import {
   footprintCatalog,
   STRIPBOARD_HOLE_PITCH_MM,
+  getPinIndexForPinNumber,
   getBodyRadius,
   getComponentBounds,
   getComponentPinHoles,
@@ -14,6 +15,7 @@ import {
   getLeadPitch,
   getPinLayout,
 } from '../lib/footprints'
+import { buildBoardConnectivity } from '../lib/connectivity'
 import { parseKiCadNetlist } from '../lib/kicad-netlist'
 import { dequeueCloudSave, enqueueCloudSave, getCloudQueueLength, getCloudQueueSnapshot } from '../lib/cloud-queue'
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../lib/local-session'
@@ -51,6 +53,10 @@ function isHoleWithinBoard(row: number, col: number, rows: number, cols: number)
 }
 
 function normalizeRefDes(value: string) {
+  return value.trim().toUpperCase()
+}
+
+function normalizeNetName(value: string) {
   return value.trim().toUpperCase()
 }
 
@@ -866,12 +872,72 @@ export const useBoardStore = defineStore('board', () => {
     board.value.links.push(link)
   }
 
+  function getUniqueAssignedNetNameAtHole(row: number, col: number) {
+    if (!board.value.netlist) {
+      return null
+    }
+
+    const connectivity = buildBoardConnectivity(board.value)
+    const targetGroup = connectivity.groupFor(row, col)
+    const componentsByRefDes = new Map(
+      board.value.components.map((component) => [normalizeRefDes(component.refDes), component]),
+    )
+    const netNamesByNormalized = new Map<string, string>()
+
+    for (const net of board.value.netlist.nets) {
+      const netName = net.name.trim()
+
+      if (!netName) {
+        continue
+      }
+
+      for (const node of net.nodes) {
+        const component = componentsByRefDes.get(normalizeRefDes(node.refDes))
+
+        if (!component) {
+          continue
+        }
+
+        const pinIndex = getPinIndexForPinNumber(component, node.pinNum)
+
+        if (pinIndex === null) {
+          continue
+        }
+
+        const hole = getComponentPinHoles(component)[pinIndex]
+
+        if (!hole) {
+          continue
+        }
+
+        if (connectivity.groupFor(hole.row, hole.col) !== targetGroup) {
+          continue
+        }
+
+        const normalized = normalizeNetName(netName)
+
+        if (!netNamesByNormalized.has(normalized)) {
+          netNamesByNormalized.set(normalized, netName)
+        }
+
+        break
+      }
+    }
+
+    if (netNamesByNormalized.size !== 1) {
+      return null
+    }
+
+    return netNamesByNormalized.values().next().value ?? null
+  }
+
   function createWire(row: number, col: number, type: WireType = 'input') {
+    const autoName = getUniqueAssignedNetNameAtHole(row, col)
     const wire: Wire = {
       id: uuidv4(),
       row,
       col,
-      signalName: `${type.toUpperCase()}_${board.value.wires.length + 1}`,
+      signalName: autoName ?? `${type.toUpperCase()}_${board.value.wires.length + 1}`,
       type,
     }
 
