@@ -301,6 +301,7 @@ onUnmounted(() => {
         @update-selected-component-value="boardStore.updateSelectedComponentValue"
         @update-selected-link-color="boardStore.updateSelectedLinkColor"
         @update-selected-wire-note="boardStore.updateSelectedWireNote"
+        @update-selected-wire-color="boardStore.updateSelectedWireColor"
         @update-selected-wire-signal-name="boardStore.updateSelectedWireSignalName"
         @update-selected-wire-type="boardStore.updateSelectedWireType"
       />

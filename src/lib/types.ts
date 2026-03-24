@@ -24,6 +24,7 @@ export interface Wire {
   col: number
   signalName: string
   type: WireType
+  color?: string
   note?: string
 }
 

@@ -419,6 +419,10 @@ function wireColor(type: string) {
   }
 }
 
+function wireDisplayColor(wire: BoardState['wires'][number]) {
+  return wire.color ?? wireColor(wire.type)
+}
+
 function toolClasses(tool: ActiveTool) {
   return props.activeTool === tool
     ? 'inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-semibold tracking-[0.16em] text-white'
@@ -1614,7 +1618,7 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
             <g v-for="link in board.links" :key="link.id">
               <path
                 :d="`M ${pointX(link.fromCol)} ${pointY(link.fromRow)} Q ${(pointX(link.fromCol) + pointX(link.toCol)) / 2} ${Math.min(pointY(link.fromRow), pointY(link.toRow)) - 18} ${pointX(link.toCol)} ${pointY(link.toRow)}`"
-                :stroke="isSelected('link', link.id) ? '#0f172a' : link.color ?? '#0f766e'"
+                :stroke="isSelected('link', link.id) ? '#0f172a' : link.color ?? '#2563eb'"
                 :stroke-width="isSelected('link', link.id) ? 5 : 3"
                 fill="none"
                 stroke-linecap="round"
@@ -1671,17 +1675,17 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                 :y1="pointY(wire.row)"
                 :x2="pointX(wire.col)"
                 :y2="pointY(wire.row) - 24"
-                :stroke="wireColor(wire.type)"
+                :stroke="wireDisplayColor(wire)"
                 stroke-width="3"
                 stroke-linecap="round"
               />
-              <circle :cx="pointX(wire.col)" :cy="pointY(wire.row) - 28" r="5" :fill="wireColor(wire.type)" />
+              <circle :cx="pointX(wire.col)" :cy="pointY(wire.row) - 28" r="5" :fill="wireDisplayColor(wire)" />
               <text
                 :x="pointX(wire.col) + 8"
                 :y="pointY(wire.row) - 24"
                 font-size="9"
                 font-weight="700"
-                :fill="wireColor(wire.type)"
+                :fill="wireDisplayColor(wire)"
               >
                 {{ wire.signalName }}
               </text>

@@ -866,7 +866,7 @@ export const useBoardStore = defineStore('board', () => {
       fromCol,
       toRow,
       toCol,
-      color: ['#0f766e', '#2563eb', '#dc2626', '#7c3aed'][board.value.links.length % 4],
+      color: '#2563eb',
     }
 
     board.value.links.push(link)
@@ -1134,6 +1134,20 @@ export const useBoardStore = defineStore('board', () => {
     }
 
     wire.type = type
+  }
+
+  function updateSelectedWireColor(color: string) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'wire') {
+      return
+    }
+
+    const wire = board.value.wires.find((item) => item.id === selectedItem.value?.id)
+
+    if (!wire) {
+      return
+    }
+
+    wire.color = color
   }
 
   function updateSelectedWireNote(note: string) {
@@ -1761,6 +1775,7 @@ export const useBoardStore = defineStore('board', () => {
     updateSelectedComponentRotation,
     updateSelectedWireSignalName,
     updateSelectedWireType,
+    updateSelectedWireColor,
     updateSelectedWireNote,
     cancelPendingPlacement,
     setStorageMode,

@@ -41,6 +41,7 @@ defineEmits<{
   updateSelectedComponentValue: [value: string]
   updateSelectedWireSignalName: [signalName: string]
   updateSelectedWireType: [type: WireType]
+  updateSelectedWireColor: [color: string]
   updateSelectedWireNote: [note: string]
 }>()
 
@@ -202,6 +203,21 @@ function toPinLayout(value: string, fallback: PinLayout) {
   }
 
   return fallback
+}
+
+function wireTypeColor(type: WireType) {
+  switch (type) {
+    case 'power':
+      return '#dc2626'
+    case 'gnd':
+      return '#0f172a'
+    case 'output':
+      return '#2563eb'
+    case 'bidirectional':
+      return '#7c3aed'
+    default:
+      return '#d97706'
+  }
 }
 </script>
 
@@ -564,10 +580,10 @@ function toPinLayout(value: string, fallback: PinLayout) {
           <input
             type="color"
             class="h-10 w-14 rounded border border-stone-300 bg-white"
-            :value="selectedLink.color ?? '#0f766e'"
+            :value="selectedLink.color ?? '#2563eb'"
             @input="$emit('updateSelectedLinkColor', ($event.target as HTMLInputElement).value)"
           />
-          <span class="text-xs text-stone-500">{{ selectedLink.color ?? '#0f766e' }}</span>
+          <span class="text-xs text-stone-500">{{ selectedLink.color ?? '#2563eb' }}</span>
         </div>
       </section>
 
@@ -617,6 +633,17 @@ function toPinLayout(value: string, fallback: PinLayout) {
             {{ type }}
           </option>
         </select>
+
+        <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Color</label>
+        <div class="mt-2 flex items-center gap-3">
+          <input
+            type="color"
+            class="h-10 w-14 rounded border border-stone-300 bg-white"
+            :value="selectedWire.color ?? wireTypeColor(selectedWire.type)"
+            @input="$emit('updateSelectedWireColor', ($event.target as HTMLInputElement).value)"
+          />
+          <span class="text-xs text-stone-500">{{ selectedWire.color ?? wireTypeColor(selectedWire.type) }}</span>
+        </div>
 
         <label class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Note</label>
         <textarea
