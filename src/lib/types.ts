@@ -41,6 +41,7 @@ export interface PlacedComponent {
   bodyRadius?: number
   dipPins?: number
   dipWidth?: number
+  singleRowPitch?: number
   pinLayout?: PinLayout
 }
 

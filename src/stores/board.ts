@@ -14,6 +14,7 @@ import {
   getFootprint,
   getLeadPitch,
   getPinLayout,
+  getSingleRowPitch,
 } from '../lib/footprints'
 import { buildBoardConnectivity } from '../lib/connectivity'
 import { parseKiCadNetlist } from '../lib/kicad-netlist'
@@ -366,10 +367,16 @@ export const useBoardStore = defineStore('board', () => {
       return undefined
     }
 
-    const match =
-      footprintHint.match(/(?:dip|pdip|dil|sip|sil)[-_ ]?(\d+)/i) ?? footprintHint.match(/(\d+)\s*pin/i)
+    if (/(?:^|[^a-z0-9])to[-_ ]?92(?:$|[^a-z0-9])/i.test(footprintHint)) {
+      return 3
+    }
 
-    if (!match || !match[1]) {
+    const match =
+      footprintHint.match(/(?:dip|pdip|dil|sip|sil)[-_ ]?(\d+)/i) ??
+      footprintHint.match(/(?:to|sot)[-_ ]?(\d+)[-_ ]?(\d+)/i) ??
+      footprintHint.match(/(\d+)\s*pin/i)
+
+    if (!match || (!match[1] && !match[2])) {
       const connectorMatrix = footprintHint.match(/(?:^|[^a-z0-9])(\d+)\s*x\s*(\d+)(?:$|[^a-z0-9])/i)
 
       if (!connectorMatrix || !connectorMatrix[1] || !connectorMatrix[2]) {
@@ -386,7 +393,8 @@ export const useBoardStore = defineStore('board', () => {
       return rows * cols
     }
 
-    const parsed = Number.parseInt(match[1], 10)
+    const parsedToken = match[2] || match[1]
+    const parsed = Number.parseInt(parsedToken ?? '', 10)
 
     if (Number.isNaN(parsed)) {
       return undefined
@@ -419,8 +427,14 @@ export const useBoardStore = defineStore('board', () => {
     }
 
     if (
+      normalized.includes('to-92') ||
+      normalized.includes('to92') ||
+      normalized.includes('to-220') ||
+      normalized.includes('to220') ||
+      normalized.includes('inline') ||
       normalized.includes('sip') ||
       normalized.includes('sil') ||
+      normalized.includes('single_') ||
       normalized.includes('single-row') ||
       normalized.includes('single row') ||
       normalized.includes('single-inline') ||
@@ -522,22 +536,25 @@ export const useBoardStore = defineStore('board', () => {
     const hint = footprintHint?.toLowerCase() ?? ''
     console.log('Selecting footprint for imported component', { refDes, footprintHint })
 
+    const isDipLikeHint = ['dip', 'pdip', 'dil', 'sip', 'sil'].some((token) => hint.includes(token))
+
     if (hint.includes('led')) {
       return 'capacitor-radial-3'
+    }
+
+    if (normalizedRef.startsWith('Q')) {
+      return 'dip-8'
+    }
+
+    if (normalizedRef.startsWith('RV')) {
+      return 'dip-8'
     }
 
     if (normalizedRef.startsWith('J')) {
       return 'dip-8'
     }
 
-    if (
-      hint.includes('dip') ||
-      hint.includes('pdip') ||
-      hint.includes('dil') ||
-      hint.includes('sip') ||
-      hint.includes('sil') ||
-      normalizedRef.startsWith('U')
-    ) {
+    if (isDipLikeHint || normalizedRef.startsWith('U')) {
       return 'dip-8'
     }
 
@@ -546,6 +563,35 @@ export const useBoardStore = defineStore('board', () => {
     }
 
     return 'resistor-axial-7'
+  }
+
+  function resolveImportedComponentProfile(refDes: string, value: string, footprintHint?: string) {
+    const hintSource = footprintHint?.trim().length ? footprintHint : value
+    const hasHintSource = hintSource.trim().length > 0
+    const normalizedRef = normalizeRefDes(refDes)
+    const footprintId = selectFootprintForImportedComponent(refDes, hintSource)
+    const footprint = getFootprint(footprintId)
+    const parsedDipPins = parseDipPinsHint(hintSource)
+    const parsedPinLayout = parsePinLayoutHint(hintSource)
+    const parsedLeadPitch = parseLeadPitchHint(hintSource)
+    const parsedDipWidth = parseDipWidthHint(hintSource)
+    const parsedRadialBodyRadius = parseRadialBodyRadiusHint(hintSource)
+    const polarityMarked = parsePolarityHint(hintSource) || normalizedRef.startsWith('D')
+    const inferredPinLayout = parsedPinLayout ?? (normalizedRef.startsWith('RV') ? 'single-row' : 'dual-row')
+    const inferredDipPins = parsedDipPins ?? (normalizedRef.startsWith('RV') ? 3 : footprint.defaultDipPins)
+
+    return {
+      hasHintSource,
+      footprintId,
+      footprint,
+      polarityMarked,
+      leadPitch: parsedLeadPitch ?? footprint.defaultLeadPitch,
+      bodyRadius: parsedRadialBodyRadius ?? footprint.defaultBodyRadius,
+      dipPins: inferredDipPins,
+      dipWidth: parsedDipWidth ?? footprint.defaultDipWidth,
+      pinLayout: inferredPinLayout,
+      singleRowPitch: inferredPinLayout === 'single-row' ? 1 : undefined,
+    }
   }
 
   function findPlacementSpot(candidate: PlacedComponent) {
@@ -581,33 +627,32 @@ export const useBoardStore = defineStore('board', () => {
   }
 
   function createPlacedImportedComponent(refDes: string, value: string, footprintHint?: string) {
-    const hintSource = footprintHint?.trim().length ? footprintHint : value
-    const footprintId = selectFootprintForImportedComponent(refDes, hintSource)
-    const footprint = getFootprint(footprintId)
-    const normalizedRef = normalizeRefDes(refDes)
-    const parsedDipPins = parseDipPinsHint(hintSource)
-    const parsedPinLayout = parsePinLayoutHint(hintSource)
-    const parsedLeadPitch = parseLeadPitchHint(hintSource)
-    const parsedDipWidth = parseDipWidthHint(hintSource)
-    const parsedRadialBodyRadius = parseRadialBodyRadiusHint(hintSource)
-    const parsedPolarity = parsePolarityHint(hintSource) || normalizedRef.startsWith('D')
+    const importProfile = resolveImportedComponentProfile(refDes, value, footprintHint)
     const component: PlacedComponent = {
       id: uuidv4(),
-      footprintId,
+      footprintId: importProfile.footprintId,
       refDes: refDes.trim(),
-      value: value.trim() || footprint.defaultValue,
+      value: value.trim() || importProfile.footprint.defaultValue,
       row: 0,
       col: 0,
-      rotation: defaultRotationForFootprint(footprintId),
-      polarityMarked: parsedPolarity,
+      rotation: defaultRotationForFootprint(importProfile.footprintId),
+      polarityMarked: importProfile.polarityMarked,
       leadPitch:
-        footprint.style === 'axial' || footprint.style === 'radial'
-          ? parsedLeadPitch ?? footprint.defaultLeadPitch
-          : footprint.defaultLeadPitch,
-      bodyRadius: footprint.style === 'radial' ? parsedRadialBodyRadius ?? footprint.defaultBodyRadius : footprint.defaultBodyRadius,
-      dipPins: footprint.style === 'dip' ? parsedDipPins ?? footprint.defaultDipPins : footprint.defaultDipPins,
-      dipWidth: footprint.style === 'dip' ? parsedDipWidth ?? footprint.defaultDipWidth : footprint.defaultDipWidth,
-      pinLayout: footprint.style === 'dip' ? parsedPinLayout ?? 'dual-row' : undefined,
+        importProfile.footprint.style === 'axial' || importProfile.footprint.style === 'radial'
+          ? importProfile.leadPitch
+          : importProfile.footprint.defaultLeadPitch,
+      bodyRadius:
+        importProfile.footprint.style === 'radial'
+          ? importProfile.bodyRadius
+          : importProfile.footprint.defaultBodyRadius,
+      dipPins: importProfile.footprint.style === 'dip' ? importProfile.dipPins : importProfile.footprint.defaultDipPins,
+      dipWidth:
+        importProfile.footprint.style === 'dip' ? importProfile.dipWidth : importProfile.footprint.defaultDipWidth,
+      pinLayout: importProfile.footprint.style === 'dip' ? importProfile.pinLayout : undefined,
+      singleRowPitch:
+        importProfile.footprint.style === 'dip' && importProfile.pinLayout === 'single-row'
+          ? importProfile.singleRowPitch
+          : undefined,
     }
 
     const placement = findPlacementSpot(component)
@@ -622,38 +667,29 @@ export const useBoardStore = defineStore('board', () => {
   }
 
   function applyImportedFootprintHints(component: PlacedComponent, refDes: string, value: string, footprintHint?: string) {
-    const hintSource = footprintHint?.trim().length ? footprintHint : value
+    const importProfile = resolveImportedComponentProfile(refDes, value, footprintHint)
 
-    if (!hintSource) {
+    if (!importProfile.hasHintSource) {
       return
     }
 
-    const normalizedRef = normalizeRefDes(refDes)
-    const nextFootprintId = selectFootprintForImportedComponent(refDes, hintSource)
-    const nextFootprint = getFootprint(nextFootprintId)
-    const parsedDipPins = parseDipPinsHint(hintSource)
-    const parsedPinLayout = parsePinLayoutHint(hintSource)
-    const parsedLeadPitch = parseLeadPitchHint(hintSource)
-    const parsedDipWidth = parseDipWidthHint(hintSource)
-    const parsedRadialBodyRadius = parseRadialBodyRadiusHint(hintSource)
-    const parsedPolarity = parsePolarityHint(hintSource) || normalizedRef.startsWith('D')
+    component.footprintId = importProfile.footprintId
+    component.rotation = defaultRotationForFootprint(importProfile.footprintId)
+    component.polarityMarked = importProfile.polarityMarked
 
-    component.footprintId = nextFootprintId
-    component.rotation = defaultRotationForFootprint(nextFootprintId)
-    component.polarityMarked = parsedPolarity
-
-    if (nextFootprint.style === 'axial' || nextFootprint.style === 'radial') {
-      component.leadPitch = parsedLeadPitch ?? nextFootprint.defaultLeadPitch
+    if (importProfile.footprint.style === 'axial' || importProfile.footprint.style === 'radial') {
+      component.leadPitch = importProfile.leadPitch
     }
 
-    if (nextFootprint.style === 'radial') {
-      component.bodyRadius = parsedRadialBodyRadius ?? nextFootprint.defaultBodyRadius
+    if (importProfile.footprint.style === 'radial') {
+      component.bodyRadius = importProfile.bodyRadius
     }
 
-    if (nextFootprint.style === 'dip') {
-      component.dipPins = parsedDipPins ?? nextFootprint.defaultDipPins
-      component.dipWidth = parsedDipWidth ?? nextFootprint.defaultDipWidth
-      component.pinLayout = parsedPinLayout ?? 'dual-row'
+    if (importProfile.footprint.style === 'dip') {
+      component.dipPins = importProfile.dipPins
+      component.dipWidth = importProfile.dipWidth
+      component.pinLayout = importProfile.pinLayout
+      component.singleRowPitch = component.pinLayout === 'single-row' ? getSingleRowPitch(component) ?? 1 : undefined
     }
   }
 
@@ -960,6 +996,7 @@ export const useBoardStore = defineStore('board', () => {
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.defaultDipPins,
       dipWidth: footprint.defaultDipWidth,
+      singleRowPitch: footprint.style === 'dip' ? 1 : undefined,
       pinLayout: footprint.style === 'dip' ? 'dual-row' : undefined,
     }
 
@@ -1410,6 +1447,7 @@ export const useBoardStore = defineStore('board', () => {
         footprintId: singleRowFootprint.id,
         dipPins: 2,
         dipWidth: singleRowFootprint.defaultDipWidth,
+        singleRowPitch: 1,
         pinLayout: 'single-row',
         leadPitch: undefined,
         bodyRadius: undefined,
@@ -1422,6 +1460,7 @@ export const useBoardStore = defineStore('board', () => {
       component.footprintId = singleRowFootprint.id
       component.dipPins = 2
       component.dipWidth = singleRowFootprint.defaultDipWidth
+      component.singleRowPitch = 1
       component.pinLayout = 'single-row'
       component.leadPitch = undefined
       component.bodyRadius = undefined
@@ -1446,6 +1485,7 @@ export const useBoardStore = defineStore('board', () => {
       bodyRadius: targetFootprint.defaultBodyRadius,
       dipPins: undefined,
       dipWidth: undefined,
+      singleRowPitch: undefined,
       pinLayout: undefined,
     }
 
@@ -1459,6 +1499,7 @@ export const useBoardStore = defineStore('board', () => {
     component.bodyRadius = targetFootprint.defaultBodyRadius
     component.dipPins = undefined
     component.dipWidth = undefined
+    component.singleRowPitch = undefined
     component.pinLayout = undefined
   }
 
@@ -1557,6 +1598,36 @@ export const useBoardStore = defineStore('board', () => {
 
     component.pinLayout = normalizedLayout
     component.dipPins = nextComponent.dipPins
+    component.singleRowPitch = normalizedLayout === 'single-row' ? getSingleRowPitch(component) ?? 1 : undefined
+  }
+
+  function updateSelectedComponentSingleRowPitch(singleRowPitch: number) {
+    if (!selectedItem.value || selectedItem.value.kind !== 'component') {
+      return
+    }
+
+    const component = board.value.components.find((item) => item.id === selectedItem.value?.id)
+
+    if (!component) {
+      return
+    }
+
+    const footprint = getFootprint(component.footprintId)
+
+    if (footprint.style !== 'dip' || getPinLayout(component) !== 'single-row') {
+      return
+    }
+
+    const nextComponent = {
+      ...component,
+      singleRowPitch,
+    }
+
+    if (!isComponentWithinBoard(nextComponent)) {
+      return
+    }
+
+    component.singleRowPitch = getSingleRowPitch(nextComponent) ?? 1
   }
 
   function updateSelectedComponentDipWidth(dipWidth: number) {
@@ -1767,6 +1838,7 @@ export const useBoardStore = defineStore('board', () => {
     updateSelectedComponentBodyRadius,
     updateSelectedComponentDipPins,
     updateSelectedComponentDipWidth,
+    updateSelectedComponentSingleRowPitch,
     updateSelectedComponentPinLayout,
     updateSelectedComponentPolarityMarked,
     updateSelectedComponentTwoLeadStyle,

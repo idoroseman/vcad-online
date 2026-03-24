@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -157,16 +157,23 @@ async function handleImportNetlist(file: File) {
     const netlist = boardStore.importKiCadNetlist(source)
     const isSchematic = file.name.toLowerCase().endsWith('.kicad_sch')
 
+    // Ensure board updates render before showing blocking alerts.
+    await nextTick()
+
     if (isSchematic && netlist.nets.length === 0) {
-      window.alert(
-        `Imported ${netlist.components.length} components from ${file.name}.\n\n` +
-          'Schematic net connectivity is not yet extracted from .kicad_sch directly. ' +
-          'For full nets/ratsnest import, use a KiCad netlist export (.xml/.net).',
-      )
+      requestAnimationFrame(() => {
+        window.alert(
+          `Imported ${netlist.components.length} components from ${file.name}.\n\n` +
+            'Schematic net connectivity is not yet extracted from .kicad_sch directly. ' +
+            'For full nets/ratsnest import, use a KiCad netlist export (.xml/.net).',
+        )
+      })
       return
     }
 
-    window.alert(`Imported ${netlist.nets.length} nets and ${netlist.components.length} components from ${file.name}.`)
+    requestAnimationFrame(() => {
+      window.alert(`Imported ${netlist.nets.length} nets and ${netlist.components.length} components from ${file.name}.`)
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Import failed.'
     window.alert(message)
@@ -197,7 +204,7 @@ async function handleAccountAction() {
 function handleAbout() {
   window.alert(
     'vCad Online\n\n' +
-      'A Web based stripboard editor by Ido Roseman.\n\n' +
+      'A web based stripboard editor by Ido Roseman.\n\n' +
       'Current features:\n' +
       '- Local offline working board\n' +
       '- Cloud backed projects\n' +
@@ -290,6 +297,7 @@ onUnmounted(() => {
         @set-footprint="boardStore.setActiveFootprint"
         @update-selected-component-body-radius="boardStore.updateSelectedComponentBodyRadius"
         @update-selected-component-dip-pins="boardStore.updateSelectedComponentDipPins"
+        @update-selected-component-single-row-pitch="boardStore.updateSelectedComponentSingleRowPitch"
         @update-selected-component-dip-width="boardStore.updateSelectedComponentDipWidth"
         @update-selected-component-pin-layout="boardStore.updateSelectedComponentPinLayout"
         @update-selected-component-polarity-marked="boardStore.updateSelectedComponentPolarityMarked"

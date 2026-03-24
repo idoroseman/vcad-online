@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch, getPinLayout } from '../../lib/footprints'
+import { getBodyRadius, getDipPinCount, getDipWidth, getFootprint, getLeadPitch, getPinLayout, getSingleRowPitch } from '../../lib/footprints'
 import type { ActiveTool, BoardState, PinLayout, PlacedComponent, WireType } from '../../lib/types'
 
 const props = defineProps<{
@@ -32,6 +32,7 @@ defineEmits<{
   updateSelectedComponentBodyRadius: [bodyRadius: number]
   updateSelectedComponentDipPins: [dipPins: number]
   updateSelectedComponentDipWidth: [dipWidth: number]
+  updateSelectedComponentSingleRowPitch: [singleRowPitch: number]
   updateSelectedComponentPinLayout: [pinLayout: PinLayout]
   updateSelectedComponentPolarityMarked: [polarityMarked: boolean]
   updateSelectedComponentTwoLeadStyle: [style: 'axial' | 'radial' | 'single-row']
@@ -147,6 +148,16 @@ function toDipPins(value: string, fallback: number) {
 }
 
 function toDipWidth(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (Number.isNaN(parsed)) {
+    return fallback
+  }
+
+  return parsed
+}
+
+function toSingleRowPitch(value: string, fallback: number) {
   const parsed = Number.parseInt(value, 10)
 
   if (Number.isNaN(parsed)) {
@@ -493,6 +504,22 @@ function wireTypeColor(type: WireType) {
           :max="getFootprint(selectedComponent.footprintId).maxDipPins ?? 40"
           :value="getDipPinCount(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipPins ?? 8"
           @input="$emit('updateSelectedComponentDipPins', toDipPins(($event.target as HTMLInputElement).value, getDipPinCount(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultDipPins ?? 8))"
+        />
+
+        <label
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip' && getPinLayout(selectedComponent) === 'single-row'"
+          class="mt-3 block text-xs font-semibold uppercase tracking-[0.16em] text-stone-500"
+        >
+          Pitch
+        </label>
+        <input
+          v-if="getFootprint(selectedComponent.footprintId).style === 'dip' && getPinLayout(selectedComponent) === 'single-row'"
+          type="number"
+          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+          :min="1"
+          :max="24"
+          :value="getSingleRowPitch(selectedComponent) ?? 1"
+          @input="$emit('updateSelectedComponentSingleRowPitch', toSingleRowPitch(($event.target as HTMLInputElement).value, getSingleRowPitch(selectedComponent) ?? 1))"
         />
 
         <label

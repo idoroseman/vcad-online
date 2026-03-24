@@ -145,6 +145,16 @@ export function getDipWidth(component: PlacedComponent) {
   return Math.max(minDipWidth, Math.min(maxDipWidth, Math.round(component.dipWidth ?? defaultDipWidth)))
 }
 
+export function getSingleRowPitch(component: PlacedComponent) {
+  const footprint = getFootprint(component.footprintId)
+
+  if (footprint.style !== 'dip' || getPinLayout(component) !== 'single-row') {
+    return null
+  }
+
+  return Math.max(1, Math.min(24, Math.round(component.singleRowPitch ?? 1)))
+}
+
 export function rotateOffset(row: number, col: number, rotation: PlacedComponent['rotation']) {
   switch (rotation) {
     case 1:
@@ -196,7 +206,8 @@ export function getDipPins(component: PlacedComponent) {
   const layout = getPinLayout(component)
 
   if (layout === 'single-row') {
-    return Array.from({ length: pinCount }, (_, index) => ({ row: index, col: 0 }))
+    const singleRowPitch = getSingleRowPitch(component) ?? 1
+    return Array.from({ length: pinCount }, (_, index) => ({ row: index * singleRowPitch, col: 0 }))
   }
 
   const width = getDipWidth(component) ?? footprint.defaultDipWidth ?? 3
