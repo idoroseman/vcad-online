@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 
 import {
   footprintCatalog,
+  STRIPBOARD_HOLE_PITCH_MM,
   getBodyRadius,
   getComponentBounds,
   getComponentPinHoles,
@@ -359,10 +360,24 @@ export const useBoardStore = defineStore('board', () => {
       return undefined
     }
 
-    const match = footprintHint.match(/(?:dip|pdip|dil)[-_ ]?(\d+)/i) ?? footprintHint.match(/(\d+)\s*pin/i)
+    const match =
+      footprintHint.match(/(?:dip|pdip|dil|sip|sil)[-_ ]?(\d+)/i) ?? footprintHint.match(/(\d+)\s*pin/i)
 
     if (!match || !match[1]) {
-      return undefined
+      const connectorMatrix = footprintHint.match(/(?:^|[^a-z0-9])(\d+)\s*x\s*(\d+)(?:$|[^a-z0-9])/i)
+
+      if (!connectorMatrix || !connectorMatrix[1] || !connectorMatrix[2]) {
+        return undefined
+      }
+
+      const rows = Number.parseInt(connectorMatrix[1], 10)
+      const cols = Number.parseInt(connectorMatrix[2], 10)
+
+      if (Number.isNaN(rows) || Number.isNaN(cols) || rows <= 0 || cols <= 0) {
+        return undefined
+      }
+
+      return rows * cols
     }
 
     const parsed = Number.parseInt(match[1], 10)
@@ -374,11 +389,149 @@ export const useBoardStore = defineStore('board', () => {
     return parsed
   }
 
+  function parsePinLayoutHint(footprintHint: string | undefined): PinLayout | undefined {
+    if (!footprintHint) {
+      return undefined
+    }
+
+    const normalized = footprintHint.toLowerCase()
+    const connectorMatrix = footprintHint.match(/(?:^|[^a-z0-9])(\d+)\s*x\s*(\d+)(?:$|[^a-z0-9])/i)
+
+    if (connectorMatrix?.[1] && connectorMatrix?.[2]) {
+      const rows = Number.parseInt(connectorMatrix[1], 10)
+      const cols = Number.parseInt(connectorMatrix[2], 10)
+
+      if (!Number.isNaN(rows) && !Number.isNaN(cols) && rows > 0 && cols > 0) {
+        if (rows === 1 || cols === 1) {
+          return 'single-row'
+        }
+
+        if (rows === 2 || cols === 2) {
+          return 'dual-row'
+        }
+      }
+    }
+
+    if (
+      normalized.includes('sip') ||
+      normalized.includes('sil') ||
+      normalized.includes('single-row') ||
+      normalized.includes('single row') ||
+      normalized.includes('single-inline') ||
+      normalized.includes('single inline')
+    ) {
+      return 'single-row'
+    }
+
+    if (normalized.includes('dip') || normalized.includes('pdip') || normalized.includes('dil')) {
+      return 'dual-row'
+    }
+
+    return undefined
+  }
+
+  function parseLeadPitchHint(footprintHint: string | undefined) {
+    if (!footprintHint) {
+      return undefined
+    }
+
+    const match = footprintHint.match(/(?:^|[_:\s])p\s*([0-9]+(?:\.[0-9]+)?)\s*mm(?=$|[^a-z0-9])/i)
+
+    if (!match || !match[1]) {
+      return undefined
+    }
+
+    const pitchMm = Number.parseFloat(match[1])
+
+    if (Number.isNaN(pitchMm) || pitchMm <= 0) {
+      return undefined
+    }
+
+    return Math.max(1, Math.round(pitchMm / STRIPBOARD_HOLE_PITCH_MM))
+  }
+
+  function parseDipWidthHint(footprintHint: string | undefined) {
+    if (!footprintHint) {
+      return undefined
+    }
+
+    const match = footprintHint.match(/(?:^|[_:\s])w\s*([0-9]+(?:\.[0-9]+)?)\s*mm(?=$|[^a-z0-9])/i)
+
+    if (!match || !match[1]) {
+      return undefined
+    }
+
+    const widthMm = Number.parseFloat(match[1])
+
+    if (Number.isNaN(widthMm) || widthMm <= 0) {
+      return undefined
+    }
+
+    return Math.max(1, Math.round(widthMm / STRIPBOARD_HOLE_PITCH_MM))
+  }
+
+  function parseRadialBodyRadiusHint(footprintHint: string | undefined) {
+    if (!footprintHint) {
+      return undefined
+    }
+
+    const match = footprintHint.match(/(?:^|[_:\s])d\s*([0-9]+(?:\.[0-9]+)?)\s*mm(?=$|[^a-z0-9])/i)
+
+    if (!match || !match[1]) {
+      return undefined
+    }
+
+    const diameterMm = Number.parseFloat(match[1])
+
+    if (Number.isNaN(diameterMm) || diameterMm <= 0) {
+      return undefined
+    }
+
+    return diameterMm / 2
+  }
+
+  function parsePolarityHint(footprintHint: string | undefined) {
+    if (!footprintHint) {
+      return false
+    }
+
+    const normalized = footprintHint.toLowerCase()
+
+    if (/(?:^|[:_])cp(?:[_:]|$)/i.test(footprintHint)) {
+      return true
+    }
+
+    if (normalized.includes('c_polarized') || normalized.includes('c-polarized')) {
+      return true
+    }
+
+    const tokens = normalized.split(/[^a-z0-9]+/).filter((token) => token.length > 0)
+    const polarizedTokens = new Set(['polarized', 'electrolytic', 'ecap', 'elco', 'led', 'diode'])
+
+    return tokens.some((token) => polarizedTokens.has(token))
+  }
+
   function selectFootprintForImportedComponent(refDes: string, footprintHint?: string) {
     const normalizedRef = normalizeRefDes(refDes)
     const hint = footprintHint?.toLowerCase() ?? ''
+    console.log('Selecting footprint for imported component', { refDes, footprintHint })
 
-    if (hint.includes('dip') || hint.includes('pdip') || hint.includes('dil') || normalizedRef.startsWith('U')) {
+    if (hint.includes('led')) {
+      return 'capacitor-radial-3'
+    }
+
+    if (normalizedRef.startsWith('J')) {
+      return 'dip-8'
+    }
+
+    if (
+      hint.includes('dip') ||
+      hint.includes('pdip') ||
+      hint.includes('dil') ||
+      hint.includes('sip') ||
+      hint.includes('sil') ||
+      normalizedRef.startsWith('U')
+    ) {
       return 'dip-8'
     }
 
@@ -422,9 +575,16 @@ export const useBoardStore = defineStore('board', () => {
   }
 
   function createPlacedImportedComponent(refDes: string, value: string, footprintHint?: string) {
-    const footprintId = selectFootprintForImportedComponent(refDes, footprintHint)
+    const hintSource = footprintHint?.trim().length ? footprintHint : value
+    const footprintId = selectFootprintForImportedComponent(refDes, hintSource)
     const footprint = getFootprint(footprintId)
-    const parsedDipPins = parseDipPinsHint(footprintHint)
+    const normalizedRef = normalizeRefDes(refDes)
+    const parsedDipPins = parseDipPinsHint(hintSource)
+    const parsedPinLayout = parsePinLayoutHint(hintSource)
+    const parsedLeadPitch = parseLeadPitchHint(hintSource)
+    const parsedDipWidth = parseDipWidthHint(hintSource)
+    const parsedRadialBodyRadius = parseRadialBodyRadiusHint(hintSource)
+    const parsedPolarity = parsePolarityHint(hintSource) || normalizedRef.startsWith('D')
     const component: PlacedComponent = {
       id: uuidv4(),
       footprintId,
@@ -433,12 +593,15 @@ export const useBoardStore = defineStore('board', () => {
       row: 0,
       col: 0,
       rotation: defaultRotationForFootprint(footprintId),
-      polarityMarked: false,
-      leadPitch: footprint.defaultLeadPitch,
-      bodyRadius: footprint.defaultBodyRadius,
+      polarityMarked: parsedPolarity,
+      leadPitch:
+        footprint.style === 'axial' || footprint.style === 'radial'
+          ? parsedLeadPitch ?? footprint.defaultLeadPitch
+          : footprint.defaultLeadPitch,
+      bodyRadius: footprint.style === 'radial' ? parsedRadialBodyRadius ?? footprint.defaultBodyRadius : footprint.defaultBodyRadius,
       dipPins: footprint.style === 'dip' ? parsedDipPins ?? footprint.defaultDipPins : footprint.defaultDipPins,
-      dipWidth: footprint.defaultDipWidth,
-      pinLayout: footprint.style === 'dip' ? 'dual-row' : undefined,
+      dipWidth: footprint.style === 'dip' ? parsedDipWidth ?? footprint.defaultDipWidth : footprint.defaultDipWidth,
+      pinLayout: footprint.style === 'dip' ? parsedPinLayout ?? 'dual-row' : undefined,
     }
 
     const placement = findPlacementSpot(component)
@@ -450,6 +613,42 @@ export const useBoardStore = defineStore('board', () => {
     component.row = placement.row
     component.col = placement.col
     return component
+  }
+
+  function applyImportedFootprintHints(component: PlacedComponent, refDes: string, value: string, footprintHint?: string) {
+    const hintSource = footprintHint?.trim().length ? footprintHint : value
+
+    if (!hintSource) {
+      return
+    }
+
+    const normalizedRef = normalizeRefDes(refDes)
+    const nextFootprintId = selectFootprintForImportedComponent(refDes, hintSource)
+    const nextFootprint = getFootprint(nextFootprintId)
+    const parsedDipPins = parseDipPinsHint(hintSource)
+    const parsedPinLayout = parsePinLayoutHint(hintSource)
+    const parsedLeadPitch = parseLeadPitchHint(hintSource)
+    const parsedDipWidth = parseDipWidthHint(hintSource)
+    const parsedRadialBodyRadius = parseRadialBodyRadiusHint(hintSource)
+    const parsedPolarity = parsePolarityHint(hintSource) || normalizedRef.startsWith('D')
+
+    component.footprintId = nextFootprintId
+    component.rotation = defaultRotationForFootprint(nextFootprintId)
+    component.polarityMarked = parsedPolarity
+
+    if (nextFootprint.style === 'axial' || nextFootprint.style === 'radial') {
+      component.leadPitch = parsedLeadPitch ?? nextFootprint.defaultLeadPitch
+    }
+
+    if (nextFootprint.style === 'radial') {
+      component.bodyRadius = parsedRadialBodyRadius ?? nextFootprint.defaultBodyRadius
+    }
+
+    if (nextFootprint.style === 'dip') {
+      component.dipPins = parsedDipPins ?? nextFootprint.defaultDipPins
+      component.dipWidth = parsedDipWidth ?? nextFootprint.defaultDipWidth
+      component.pinLayout = parsedPinLayout ?? 'dual-row'
+    }
   }
 
   function syncPlacedComponentsFromNetlist(netlist: Netlist) {
@@ -467,6 +666,8 @@ export const useBoardStore = defineStore('board', () => {
       const existing = existingByRef.get(normalizedRef)
 
       if (existing) {
+        applyImportedFootprintHints(existing, imported.refDes, imported.value, imported.footprintHint)
+
         if (imported.value.trim().length > 0) {
           existing.value = imported.value.trim()
         }
