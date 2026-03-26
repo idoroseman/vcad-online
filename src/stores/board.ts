@@ -983,6 +983,8 @@ export const useBoardStore = defineStore('board', () => {
   function createComponent(row: number, col: number) {
     const footprint = getFootprint(activeFootprintId.value)
     const countForPrefix = board.value.components.filter((item) => item.refDes.startsWith(footprint.prefix)).length + 1
+    const pinLayout: PinLayout | undefined =
+      footprint.style === 'dip' ? (footprint.defaultPinLayout ?? 'dual-row') : undefined
     const component: PlacedComponent = {
       id: uuidv4(),
       footprintId: footprint.id,
@@ -996,8 +998,8 @@ export const useBoardStore = defineStore('board', () => {
       bodyRadius: footprint.defaultBodyRadius,
       dipPins: footprint.defaultDipPins,
       dipWidth: footprint.defaultDipWidth,
-      singleRowPitch: footprint.style === 'dip' ? 1 : undefined,
-      pinLayout: footprint.style === 'dip' ? 'dual-row' : undefined,
+      singleRowPitch: pinLayout === 'single-row' ? 1 : undefined,
+      pinLayout,
     }
 
     if (!isComponentWithinBoard(component)) {

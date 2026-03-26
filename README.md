@@ -69,6 +69,14 @@ cp .env.example .env
 
 Cloud mode is disabled until all of these values are present.
 
+Optional analytics:
+
+```bash
+VITE_GA_MEASUREMENT_ID=G-XXXXXXXXXX
+```
+
+When this value is set, the app loads Google Analytics and tracks SPA page views on route changes.
+
 ## Firestore Rules
 
 Firestore rules live in `firestore.rules`, with `firebase.json` configured to deploy them.

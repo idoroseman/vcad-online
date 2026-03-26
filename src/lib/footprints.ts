@@ -11,6 +11,7 @@ export interface FootprintDefinition {
   id: string
   label: string
   style: 'axial' | 'radial' | 'dip'
+  defaultPinLayout?: PinLayout
   prefix: string
   defaultValue: string
   pins: FootprintPin[]
@@ -34,7 +35,7 @@ export const footprintCatalog: FootprintDefinition[] = [
     label: 'Axial Resistor',
     style: 'axial',
     prefix: 'R',
-    defaultValue: '10k',
+    defaultValue: '',
     pins: [],
     defaultLeadPitch: 4,
     minLeadPitch: 3,
@@ -45,7 +46,7 @@ export const footprintCatalog: FootprintDefinition[] = [
     label: 'Radial Capacitor',
     style: 'radial',
     prefix: 'C',
-    defaultValue: '100n',
+    defaultValue: '',
     pins: [],
     defaultLeadPitch: 2,
     minLeadPitch: 1,
@@ -58,11 +59,27 @@ export const footprintCatalog: FootprintDefinition[] = [
     id: 'dip-8',
     label: 'DIP IC',
     style: 'dip',
+    defaultPinLayout: 'dual-row',
     prefix: 'U',
-    defaultValue: 'LM358',
+    defaultValue: '',
     pins: [],
     defaultDipPins: 8,
     minDipPins: 4,
+    maxDipPins: 40,
+    defaultDipWidth: 3,
+    minDipWidth: 2,
+    maxDipWidth: 12,
+  },
+  {
+    id: 'sip-8',
+    label: 'Single Row',
+    style: 'dip',
+    defaultPinLayout: 'single-row',
+    prefix: 'U',
+    defaultValue: '',
+    pins: [],
+    defaultDipPins: 3,
+    minDipPins: 1,
     maxDipPins: 40,
     defaultDipWidth: 3,
     minDipWidth: 2,

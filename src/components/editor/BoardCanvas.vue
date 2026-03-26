@@ -233,6 +233,7 @@ const addOptions = [
   { label: 'Axial', footprintId: 'resistor-axial-7' },
   { label: 'Radial', footprintId: 'capacitor-radial-3' },
   { label: 'IC', footprintId: 'dip-8' },
+  { label: 'Single Row', footprintId: 'sip-8' },
 ]
 
 function serializeBoardSvg() {
