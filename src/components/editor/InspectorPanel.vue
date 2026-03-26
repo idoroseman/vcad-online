@@ -549,10 +549,10 @@ function wireTypeColor(type: WireType) {
           type="number"
           step="0.1"
           class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
-          :min="(getFootprint(selectedComponent.footprintId).minBodyRadius ?? 0.75) * 2"
-          :max="(getFootprint(selectedComponent.footprintId).maxBodyRadius ?? 4) * 2"
-          :value="(getBodyRadius(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultBodyRadius ?? 1.2) * 2"
-          @input="$emit('updateSelectedComponentBodyRadius', toBodyDiameter(($event.target as HTMLInputElement).value, (getBodyRadius(selectedComponent) ?? getFootprint(selectedComponent.footprintId).defaultBodyRadius ?? 1.2) * 2) / 2)"
+          :min="getFootprint(selectedComponent.footprintId).minBodyDiameter ?? 1.5"
+          :max="getFootprint(selectedComponent.footprintId).maxBodyDiameter ?? 8"
+          :value="(getBodyRadius(selectedComponent) ?? ((getFootprint(selectedComponent.footprintId).defaultBodyDiameter ?? 2.4) / 2)) * 2"
+          @input="$emit('updateSelectedComponentBodyRadius', toBodyDiameter(($event.target as HTMLInputElement).value, (getBodyRadius(selectedComponent) ?? ((getFootprint(selectedComponent.footprintId).defaultBodyDiameter ?? 2.4) / 2)) * 2) / 2)"
         />
       </section>
 

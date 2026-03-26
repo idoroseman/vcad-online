@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 
 import {
   footprintCatalog,
+  footprintMap,
   STRIPBOARD_HOLE_PITCH_MM,
   getPinIndexForPinNumber,
   getBodyRadius,
@@ -586,7 +587,7 @@ export const useBoardStore = defineStore('board', () => {
       footprint,
       polarityMarked,
       leadPitch: parsedLeadPitch ?? footprint.defaultLeadPitch,
-      bodyRadius: parsedRadialBodyRadius ?? footprint.defaultBodyRadius,
+      bodyRadius: parsedRadialBodyRadius ?? ((footprint.defaultBodyDiameter ?? 2.4) / 2),
       dipPins: inferredDipPins,
       dipWidth: parsedDipWidth ?? footprint.defaultDipWidth,
       pinLayout: inferredPinLayout,
@@ -644,7 +645,7 @@ export const useBoardStore = defineStore('board', () => {
       bodyRadius:
         importProfile.footprint.style === 'radial'
           ? importProfile.bodyRadius
-          : importProfile.footprint.defaultBodyRadius,
+          : ((importProfile.footprint.defaultBodyDiameter ?? 2.4) / 2),
       dipPins: importProfile.footprint.style === 'dip' ? importProfile.dipPins : importProfile.footprint.defaultDipPins,
       dipWidth:
         importProfile.footprint.style === 'dip' ? importProfile.dipWidth : importProfile.footprint.defaultDipWidth,
@@ -874,10 +875,52 @@ export const useBoardStore = defineStore('board', () => {
     selectedItem.value = item
   }
 
+  function resolveFootprintId(footprintId: string) {
+    const normalized = footprintId.trim().toLowerCase()
+
+    if (!normalized) {
+      return null
+    }
+
+    if (footprintMap.has(normalized)) {
+      return normalized
+    }
+
+    const aliases: Record<string, string> = {
+      resistor: 'resistor',
+      resistors: 'resistor',
+      capacitor: 'capacitor',
+      capacitors: 'capacitor',
+      'polarized capacitor': 'polarized-capacitor',
+      'polarized capacitors': 'polarized-capacitor',
+      inductor: 'inductor',
+      inductors: 'inductor',
+      diode: 'diode',
+      diodes: 'diode',
+      led: 'led',
+      leds: 'led',
+      transistor: 'transistor',
+      transistors: 'transistor',
+      connector: 'connector',
+      connectors: 'connector',
+      ic: 'ic',
+    }
+
+    const alias = aliases[normalized]
+
+    if (alias && footprintMap.has(alias)) {
+      return alias
+    }
+
+    return null
+  }
+
   function setActiveFootprint(footprintId: string) {
-    activeFootprintId.value = footprintCatalog.some((item) => item.id === footprintId)
-      ? footprintId
-      : footprintCatalog[0].id
+    const resolved = resolveFootprintId(footprintId)
+
+    if (resolved) {
+      activeFootprintId.value = resolved
+    }
   }
 
   function renameProject(name: string) {
@@ -993,9 +1036,9 @@ export const useBoardStore = defineStore('board', () => {
       row,
       col,
       rotation: defaultRotationForFootprint(footprint.id),
-      polarityMarked: false,
+      polarityMarked: footprint.defaultPolarityMarked ?? false,
       leadPitch: footprint.defaultLeadPitch,
-      bodyRadius: footprint.defaultBodyRadius,
+      bodyRadius: footprint.defaultBodyDiameter ? footprint.defaultBodyDiameter / 2 : undefined,
       dipPins: footprint.defaultDipPins,
       dipWidth: footprint.defaultDipWidth,
       singleRowPitch: pinLayout === 'single-row' ? 1 : undefined,
@@ -1484,7 +1527,7 @@ export const useBoardStore = defineStore('board', () => {
       footprintId: targetFootprint.id,
       rotation: style === 'axial' ? defaultRotationForFootprint(targetFootprint.id) : component.rotation,
       leadPitch: targetFootprint.defaultLeadPitch,
-      bodyRadius: targetFootprint.defaultBodyRadius,
+      bodyRadius: targetFootprint.defaultBodyDiameter ? targetFootprint.defaultBodyDiameter / 2 : undefined,
       dipPins: undefined,
       dipWidth: undefined,
       singleRowPitch: undefined,
@@ -1498,7 +1541,7 @@ export const useBoardStore = defineStore('board', () => {
     component.footprintId = targetFootprint.id
     component.rotation = style === 'axial' ? defaultRotationForFootprint(targetFootprint.id) : component.rotation
     component.leadPitch = targetFootprint.defaultLeadPitch
-    component.bodyRadius = targetFootprint.defaultBodyRadius
+    component.bodyRadius = targetFootprint.defaultBodyDiameter ? targetFootprint.defaultBodyDiameter / 2 : undefined
     component.dipPins = undefined
     component.dipWidth = undefined
     component.singleRowPitch = undefined
@@ -1531,7 +1574,7 @@ export const useBoardStore = defineStore('board', () => {
       return
     }
 
-    component.bodyRadius = getBodyRadius(nextComponent) ?? footprint.defaultBodyRadius
+    component.bodyRadius = getBodyRadius(nextComponent) ?? ((footprint.defaultBodyDiameter ?? 2.4) / 2)
   }
 
   function updateSelectedComponentDipPins(dipPins: number) {

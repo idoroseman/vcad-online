@@ -12,15 +12,16 @@ export interface FootprintDefinition {
   label: string
   style: 'axial' | 'radial' | 'dip'
   defaultPinLayout?: PinLayout
+  defaultPolarityMarked?: boolean
   prefix: string
   defaultValue: string
   pins: FootprintPin[]
   defaultLeadPitch?: number
   minLeadPitch?: number
   maxLeadPitch?: number
-  defaultBodyRadius?: number
-  minBodyRadius?: number
-  maxBodyRadius?: number
+  defaultBodyDiameter?: number
+  minBodyDiameter?: number
+  maxBodyDiameter?: number
   defaultDipPins?: number
   minDipPins?: number
   maxDipPins?: number
@@ -30,6 +31,129 @@ export interface FootprintDefinition {
 }
 
 export const footprintCatalog: FootprintDefinition[] = [
+  {
+    id: 'resistor',
+    label: 'Resistor',
+    style: 'axial',
+    prefix: 'R',
+    defaultValue: '',
+    pins: [],
+    defaultLeadPitch: 4,
+    minLeadPitch: 3,
+    maxLeadPitch: 24,
+  },
+  {
+    id: 'capacitor',
+    label: 'Capacitor',
+    style: 'radial',
+    prefix: 'C',
+    defaultValue: '',
+    pins: [],
+    defaultLeadPitch: 1,
+    minLeadPitch: 1,
+    maxLeadPitch: 12,
+    defaultBodyDiameter: 3.5,
+    minBodyDiameter: 1.5,
+    maxBodyDiameter: 50,
+  },
+  {
+    id: 'polarized-capacitor',
+    label: 'Polarized Capacitor',
+    style: 'radial',
+    defaultPolarityMarked: true,
+    prefix: 'C',
+    defaultValue: '',
+    pins: [],
+    defaultLeadPitch: 2,
+    minLeadPitch: 1,
+    maxLeadPitch: 12,
+    defaultBodyDiameter: 4.0,
+    minBodyDiameter: 1.5,
+    maxBodyDiameter: 50,
+  },
+  {
+    id: 'inductor',
+    label: 'Inductor',
+    style: 'axial',
+    prefix: 'L',
+    defaultValue: '',
+    pins: [],
+    defaultLeadPitch: 4,
+    minLeadPitch: 3,
+    maxLeadPitch: 24,
+  },
+  {
+    id: 'diode',
+    label: 'Diode',
+    style: 'axial',
+    defaultPolarityMarked: true,
+    prefix: 'D',
+    defaultValue: '',
+    pins: [],
+    defaultLeadPitch: 4,
+    minLeadPitch: 3,
+    maxLeadPitch: 24,
+  },
+  {
+    id: 'led',
+    label: 'LED',
+    style: 'radial',
+    defaultPolarityMarked: true,
+    prefix: 'D',
+    defaultValue: '',
+    pins: [],
+    defaultLeadPitch: 2,
+    minLeadPitch: 1,
+    maxLeadPitch: 12,
+    defaultBodyDiameter: 5,
+    minBodyDiameter: 1.5,
+    maxBodyDiameter: 50,
+  },
+  {
+    id: 'transistor',
+    label: 'Transistor',
+    style: 'dip',
+    defaultPinLayout: 'single-row',
+    prefix: 'Q',
+    defaultValue: '',
+    pins: [],
+    defaultDipPins: 3,
+    minDipPins: 1,
+    maxDipPins: 40,
+    defaultDipWidth: 3,
+    minDipWidth: 2,
+    maxDipWidth: 12,
+  },
+  {
+    id: 'connector',
+    label: 'Connector',
+    style: 'dip',
+    defaultPinLayout: 'single-row',
+    prefix: 'J',
+    defaultValue: '',
+    pins: [],
+    defaultDipPins: 2,
+    minDipPins: 1,
+    maxDipPins: 40,
+    defaultDipWidth: 3,
+    minDipWidth: 2,
+    maxDipWidth: 12,
+  },
+  {
+    id: 'ic',
+    label: 'IC',
+    style: 'dip',
+    defaultPinLayout: 'dual-row',
+    prefix: 'U',
+    defaultValue: '',
+    pins: [],
+    defaultDipPins: 8,
+    minDipPins: 4,
+    maxDipPins: 40,
+    defaultDipWidth: 3,
+    minDipWidth: 2,
+    maxDipWidth: 12,
+  },
   {
     id: 'resistor-axial-7',
     label: 'Axial Resistor',
@@ -51,9 +175,9 @@ export const footprintCatalog: FootprintDefinition[] = [
     defaultLeadPitch: 2,
     minLeadPitch: 1,
     maxLeadPitch: 12,
-    defaultBodyRadius: 1.2,
-    minBodyRadius: 0.75,
-    maxBodyRadius: 25,
+    defaultBodyDiameter: 2.4,
+    minBodyDiameter: 1.5,
+    maxBodyDiameter: 50,
   },
   {
     id: 'dip-8',
@@ -114,9 +238,9 @@ export function getBodyRadius(component: PlacedComponent) {
     return null
   }
 
-  const minBodyRadius = footprint.minBodyRadius ?? 0.75
-  const maxBodyRadius = footprint.maxBodyRadius ?? 25
-  const defaultBodyRadius = footprint.defaultBodyRadius ?? 1.2
+  const minBodyRadius = (footprint.minBodyDiameter ?? 1.5) / 2
+  const maxBodyRadius = (footprint.maxBodyDiameter ?? 50) / 2
+  const defaultBodyRadius = (footprint.defaultBodyDiameter ?? 2.4) / 2
 
   return Math.max(minBodyRadius, Math.min(maxBodyRadius, component.bodyRadius ?? defaultBodyRadius))
 }
@@ -348,7 +472,7 @@ export function getRadialBodyGeometry(component: PlacedComponent) {
   }
 
   const [firstPin, secondPin] = getComponentPinHoles(component)
-  const radiusMm = getBodyRadius(component) ?? footprint.defaultBodyRadius ?? 1.2
+  const radiusMm = getBodyRadius(component) ?? (footprint.defaultBodyDiameter ?? 2.4) / 2
   const radiusBoard = radiusMm / STRIPBOARD_HOLE_PITCH_MM
   const midpoint = {
     row: (firstPin.row + secondPin.row) / 2,

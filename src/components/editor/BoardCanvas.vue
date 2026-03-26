@@ -230,10 +230,15 @@ const hoveredNetCount = computed(() => {
 })
 
 const addOptions = [
-  { label: 'Axial', footprintId: 'resistor-axial-7' },
-  { label: 'Radial', footprintId: 'capacitor-radial-3' },
-  { label: 'IC', footprintId: 'dip-8' },
-  { label: 'Single Row', footprintId: 'sip-8' },
+  { label: 'Resistors', footprintId: 'resistor' },
+  { label: 'Capacitors', footprintId: 'capacitor' },
+  { label: 'Polarized Capacitors', footprintId: 'polarized-capacitor' },
+  { label: 'Inductors', footprintId: 'inductor' },
+  { label: 'Diodes', footprintId: 'diode' },
+  { label: 'LED', footprintId: 'led' },
+  { label: 'Transistors', footprintId: 'transistor' },
+  { label: 'Connectors', footprintId: 'connector' },
+  { label: 'IC', footprintId: 'ic' },
 ]
 
 function serializeBoardSvg() {
@@ -1138,11 +1143,13 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                 v-for="option in addOptions"
                 :key="option.footprintId"
                 class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-100"
-                @click.prevent="selectAddOption(option.footprintId)"
+                @click.prevent.stop="selectAddOption(option.footprintId)"
               >
                 <span>{{ option.label }}</span>
-                <span v-if="activeFootprintId === option.footprintId && activeTool === 'component'" class="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500">
-                  Active
+                <span v-if="activeFootprintId === option.footprintId && activeTool === 'component'" class="inline-flex h-4 w-4 items-center justify-center text-stone-500" aria-label="Selected">
+                  <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
                 </span>
               </button>
             </div>
@@ -1506,6 +1513,7 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                   {{ component.refDes }}
                 </text>
                 <text
+                  v-if="component.value.trim().length > 0"
                   :x="(pointX(getComponentBounds(component).minCol) + pointX(getComponentBounds(component).maxCol)) / 2"
                   :y="(pointY(getComponentBounds(component).minRow) + pointY(getComponentBounds(component).maxRow)) / 2 + 8"
                   font-size="7.5"
@@ -1513,7 +1521,7 @@ function shouldDrawPinsAfterBody(component: BoardState['components'][number]) {
                   text-anchor="middle"
                   :fill="isSelected('component', component.id) ? '#fde68a' : '#57534e'"
                 >
-                  {{ component.value || getFootprint(component.footprintId).label }}
+                  {{ component.value }}
                 </text>
               </g>
             </g>
